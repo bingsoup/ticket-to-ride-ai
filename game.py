@@ -14,17 +14,20 @@ class Color(Enum):
     PINK = "pink"
     WILD = "wild"
 
+# City class to store city name and connections
 @dataclass
 class City:
     name: str
     connections: Dict[str, List[Tuple[int, Color]]]  # city_name -> [(length, color)]
 
+# Destination class to store destination cities and points
 @dataclass
 class Destination:
     city1: str
     city2: str
     points: int
 
+# Player class to store player information TODO - Restructure to store some of this into a gamestate dataclass that stores board state
 @dataclass
 class Player:
     name: str
@@ -46,11 +49,14 @@ class Player:
     def getTrainCards(self) -> List[Tuple[Color, int]]:
         return [(color, count) for color, count in self.train_cards.items() if count > 0]
 
+# TODO - Add a state dataclass to store player independent game state (score, board state, decks, etc.)
+
+# General game class which stores players, current player index, train deck, destination deck, face-up cards, and board
+# TODO - Restructure such that this class only stores methods for game logic and state is stored in a separate dataclass
 class TicketToRide:
     def __init__(self):
         self.players: List[Player] = []
         self.current_player_idx: int = 0
-        
         self.train_deck: List[Color] = []
         self.destination_deck: List[Destination] = []
         self.face_up_cards: List[Color] = []
@@ -265,9 +271,7 @@ class TicketToRide:
             })
         }
         return board
-    
-    
-    
+     
     def setup_game(self):
         # Initialise decks
         self.initialise_train_deck()
@@ -277,7 +281,6 @@ class TicketToRide:
         for player in self.players:
             self.deal_initial_cards(player)
             
-    
     def initialise_train_deck(self):
         # Add 12 of each color (excluding wild) and 14 wild cards
         for color in Color:
@@ -335,7 +338,7 @@ class TicketToRide:
         # Deal 3 destination cards, player must keep at least 2
         destinations = [self.destination_deck.pop() for _ in range(3)]
         # TODO - player must keep at least 2 & can discard 1
-        player.destinations.extend(destinations[:2])
+        player.destinations.extend(destinations[:3])
                 
         print(f"{player.name} has been dealt the following destinations: {', '.join(self.formatted_destinations(player))}")
         print(f"{player.name} has been dealt the following train cards: {', '.join(self.formatted_trains(player))}")
@@ -425,8 +428,10 @@ class TicketToRide:
 
         choice: Enum = input("<1: Draw Train cards, 2: Claim a route, 3: Draw destination tickets, 4: Print board, 5: Print routes you can complete, 6: Print score, exit: Exit game>\n")
 
+        # Draw train cards
         if choice == "1":
             self.draw_train_cards(player)
+        # Claim a route
         elif choice == "2":
             print("Choose a route to claim:")
             city1 = input("Enter the first city: ")
@@ -442,23 +447,29 @@ class TicketToRide:
                     if self.route_completable(player, city1, city2, color):
                         possibleColors.append(color)
                         print(f"Claim route with {color}")
+                # TODO - player may be in a position where they can claim a route with two color choices
                 #colorChoice = input("Choose a color to claim: ")
                 self.claim_route(player, city1, city2, possibleColors[0])
             else:
                 print("Invalid route, going back.")
                 self.play_turn(player)
+        # Draw destination tickets
         elif choice == "3":
             self.draw_destination_tickets(player)
+        # Print board
         elif choice == "4":
             self.print_board()
             self.play_turn(player)
+        # Print routes you can complete
         elif choice == "5":
             print("Routes you can complete:")
             self.print_available_routes(player)
             self.play_turn(player)
+        # Print score
         elif choice == "6":
             print(f"{player.name}'s score: {player.points}")
             self.play_turn(player)
+        # Exit game
         elif choice == "exit":
             exit()
         else:
@@ -466,9 +477,9 @@ class TicketToRide:
             self.play_turn(player)
         for player in self.players:
             player.turn += 1
+
     def draw_train_cards(self, player: Player):
         # Draw two cards from the deck or face-up cards
-        
         drawn = 0
         while drawn < 2:
             choice = input("Would you like to draw from the face-up cards? (y/n)")
@@ -514,7 +525,10 @@ class TicketToRide:
         # Pick up three destination tickets, player must keep at least one
         destinations = [self.destination_deck.pop() for _ in range(3)]
 
-        print(f"{player.name} has been dealt the following destinations: {destinations[0].city1} to {destinations[0].city2} ({destinations[0].points}), {destinations[1].city1} to {destinations[1].city2} ({destinations[1].points}), {destinations[2].city1} to {destinations[2].city2} ({destinations[2].points})")
+        print(f"{player.name} has been dealt the following destinations:  \
+        {destinations[0].city1} to {destinations[0].city2} ({destinations[0].points}),  \
+        {destinations[1].city1} to {destinations[1].city2} ({destinations[1].points}),  \
+        {destinations[2].city1} to {destinations[2].city2} ({destinations[2].points})")
         
         numDestinations = 3
         # must keep atleast one
@@ -538,10 +552,9 @@ class TicketToRide:
         player.destinations.extend(destinations)
         print(f"{player.name} current destinations: {', '.join(self.formatted_destinations(player))}")
         
-        # TODO - player must keep at least one destination
-        
     
     def calculate_final_scores(self):
+        # TODO - calculate final scores using completed destination tickets, longest route, and remaining trains
         pass
 
 def main():
