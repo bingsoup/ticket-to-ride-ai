@@ -65,6 +65,52 @@ class Route:
 class GameState:
     def __init__(self):
         # TODO - put this into a function
+        self.routes = {}
+        self.players: List[Player] = []
+        self.current_player_idx: int = 0
+        self.score: Dict[str, int] = {}
+        self.train_deck: List[Color] = []
+        self.destination_deck: List[Destination] = []
+        self.face_up_cards: List[Color] = []
+
+    def initialise_destination_deck(self):
+        # Add destination tickets to the deck
+        destinations = [
+            Destination("Los Angeles", "New York City", 21),
+            Destination("Duluth", "Houston", 8),
+            Destination("Sault St. Marie", "Nashville", 8),
+            Destination("New York City", "Atlanta", 6),
+            Destination("Portland", "Nashville", 17),
+            Destination("Vancouver", "Montreal", 20),
+            Destination("Duluth", "El Paso", 10),
+            Destination("Toronto", "Miami", 10),
+            Destination("Portland", "Phoenix", 11),
+            Destination("Dallas", "New York City", 11),
+            Destination("Calgary", "Salt Lake City", 7),
+            Destination("Calgary", "Phoenix", 13),
+            Destination("Los Angeles", "Miami", 20),
+            Destination("Winnipeg", "Little Rock", 11),
+            Destination("San Francisco", "Atlanta", 17),
+            Destination("Kansas City", "Houston", 5),
+            Destination("Los Angeles", "Chicago", 16),
+            Destination("Denver", "Pittsburgh", 11),
+            Destination("Chicago", "Santa Fe", 9),
+            Destination("Vancouver", "Santa Fe", 13),
+            Destination("Boston", "Miami", 12),
+            Destination("Chicago", "New Orleans", 7),
+            Destination("Montreal", "Atlanta", 9),
+            Destination("Seattle", "New York City", 22),
+            Destination("Denver", "El Paso", 4),
+            Destination("Helena", "Los Angeles", 8),
+            Destination("Winnipeg", "Houston", 12),
+            Destination("Montreal", "New Orleans", 13),
+            Destination("Sault St. Marie", "Oklahoma City", 9),
+            Destination("Seattle", "Los Angeles", 9),
+        ]
+        self.destination_deck = destinations
+        random.shuffle(self.destination_deck)
+        
+    def initialise_routes(self):
         self.routes = {
             "New York": {
                 "Boston": [
@@ -550,56 +596,13 @@ class GameState:
                 ]
             }
         }
-        self.players: List[Player] = []
-        self.current_player_idx: int = 0
-        self.score: Dict[str, int] = {}
-        self.train_deck: List[Color] = []
-        self.destination_deck: List[Destination] = []
-        self.face_up_cards: List[Color] = []
-
-    def initialise_destination_deck(self):
-        # Add destination tickets to the deck
-        destinations = [
-            Destination("Los Angeles", "New York City", 21),
-            Destination("Duluth", "Houston", 8),
-            Destination("Sault St. Marie", "Nashville", 8),
-            Destination("New York City", "Atlanta", 6),
-            Destination("Portland", "Nashville", 17),
-            Destination("Vancouver", "Montreal", 20),
-            Destination("Duluth", "El Paso", 10),
-            Destination("Toronto", "Miami", 10),
-            Destination("Portland", "Phoenix", 11),
-            Destination("Dallas", "New York City", 11),
-            Destination("Calgary", "Salt Lake City", 7),
-            Destination("Calgary", "Phoenix", 13),
-            Destination("Los Angeles", "Miami", 20),
-            Destination("Winnipeg", "Little Rock", 11),
-            Destination("San Francisco", "Atlanta", 17),
-            Destination("Kansas City", "Houston", 5),
-            Destination("Los Angeles", "Chicago", 16),
-            Destination("Denver", "Pittsburgh", 11),
-            Destination("Chicago", "Santa Fe", 9),
-            Destination("Vancouver", "Santa Fe", 13),
-            Destination("Boston", "Miami", 12),
-            Destination("Chicago", "New Orleans", 7),
-            Destination("Montreal", "Atlanta", 9),
-            Destination("Seattle", "New York City", 22),
-            Destination("Denver", "El Paso", 4),
-            Destination("Helena", "Los Angeles", 8),
-            Destination("Winnipeg", "Houston", 12),
-            Destination("Montreal", "New Orleans", 13),
-            Destination("Sault St. Marie", "Oklahoma City", 9),
-            Destination("Seattle", "Los Angeles", 9),
-        ]
-        self.destination_deck = destinations
-        random.shuffle(self.destination_deck)
 
     def get_routes_from_city(self, city: str) -> Dict[str, List[Route]]:
         """Get all routes from a specific city."""
         return self.routes.get(city, {})
 
     def get_routes_between_cities(self, city1: str, city2: str) -> List[Route]:
-        """Get all routes between two specific cities."""
+        """Get both routes between two specific cities."""
         routes = []
         # Check direct routes
         if city2 in self.routes.get(city1, {}):
@@ -625,6 +628,10 @@ class GameState:
         routes.append(self.get_routes_between_cities(city1, city2))
         routes.append(self.get_routes_between_cities(city2, city1))
         for route in routes:
+            if color == Color.WILD and not route[0].is_claimed():
+                route[0].claim(player)
+                route[1].claim(player)
+                return True
             if route[0].color == color and not route[0].is_claimed():
                 route[0].claim(player)
                 route[1].claim(player)
@@ -647,6 +654,7 @@ class TicketToRide:
     def setup_game(self, players: List[Player]):
         self.game_state.players = players
         self.initialise_train_deck()
+        self.game_state.initialise_routes()
         self.game_state.initialise_destination_deck()
         
         # Deal initial cards to each player
@@ -700,6 +708,9 @@ class TicketToRide:
         
         for city1, city2, route in unclaimed_routes:
             # Check if player has enough cards to claim the route
+            if player.train_cards[Color.WILD] >= route.length:
+                # TODO allow combinations of wild and other colors
+                available_routes.append((city1, city2, route))
             if player.train_cards[route.color] >= route.length:
                 available_routes.append((city1, city2, route))
         
@@ -763,17 +774,36 @@ class TicketToRide:
             return
 
         available_colors = []
-        for route in routes:
-            if route.claimed_by is None and player.train_cards[route.color] >= route.length:
+        
+        route = routes[0]
+        if route.claimed_by is None:
+            # TODO allow player to use a combination of wild and other colors
+            if player.train_cards[route.color] >= route.length:
                 available_colors.append(route.color)
+            if player.train_cards[Color.WILD] >= route.length:
+                available_colors.append(Color.WILD)
 
-        if not available_colors:
+        if available_colors == []:
             print("You don't have enough cards to claim any routes between these cities.")
             self.play_turn(player)
-            return
+            return 
+        
+        if len(available_colors) > 1:
+            color = input(f"Choose a color to claim the route ({', '.join([colors.name for colors in available_colors])}): ")
+            if color == "back":
+                self.play_turn(player)
+                return
+            for colors in available_colors:
+                if color == colors.name:
+                    color = colors
+            if color not in available_colors:
+                print("Invalid color choice, please try again.")
+                # TODO probably make a color choice function
+                self.handle_claim_route(player)
+                return
+        else:
+            color = available_colors[0]
 
-        # For now, just use the first available color
-        color = available_colors[0]
         if self.game_state.claim_route(city1, city2, color, player.name):
             # Remove cards from player's hand
             route_length = next(route.length for route in routes if route.color == color)
@@ -788,6 +818,7 @@ class TicketToRide:
     def draw_train_cards(self, player: Player):
         drawn = 0
         while drawn < 2:
+            # TODO only allow play to pick up 1 card if they take a wild card, disallow from taking a wild as second card
             choice = input("Would you like to draw from the face-up cards? (y/n)")
             if choice == "y":
                 print("Choose a card to draw:")
