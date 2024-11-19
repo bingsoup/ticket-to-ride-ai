@@ -1,7 +1,10 @@
+from collections import deque
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Set, Tuple
 from enum import Enum
 import random
+
+from graph import TicketToRideVisualizer
 
 class Color(Enum):
     RED = "red"
@@ -12,6 +15,7 @@ class Color(Enum):
     ORANGE = "orange"
     WHITE = "white"
     PINK = "pink"
+    GRAY = "gray"
     WILD = "wild"
 
 # City class to store city name and connections
@@ -27,7 +31,7 @@ class Destination:
     city2: str
     points: int
 
-# Player class to store player information TODO - Restructure to store some of this into a gamestate dataclass that stores board state
+# Player class to store player information # TODO - move turn into gamestate
 @dataclass
 class Player:
     name: str
@@ -72,6 +76,7 @@ class GameState:
         self.train_deck: List[Color] = []
         self.destination_deck: List[Destination] = []
         self.face_up_cards: List[Color] = []
+        self.visualizer = None
 
     def initialise_destination_deck(self):
         # Add destination tickets to the deck
@@ -124,6 +129,9 @@ class GameState:
                 "Washington": [
                     Route(length=2, color=Color.ORANGE),
                     Route(length=2, color=Color.BLACK)
+                ],
+                "Montreal": [
+                    Route(length=3, color=Color.BLUE)
                 ]
             },
             "Boston": {
@@ -132,7 +140,8 @@ class GameState:
                     Route(length=2, color=Color.RED)
                 ],
                 "Montreal": [
-                    Route(length=2, color=Color.BLUE)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ]
             },
             "Pittsburgh": {
@@ -141,13 +150,13 @@ class GameState:
                     Route(length=2, color=Color.GREEN)
                 ],
                 "Washington": [
-                    Route(length=2, color=Color.ORANGE)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Raleigh": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Nashville": [
-                    Route(length=3, color=Color.YELLOW)
+                    Route(length=4, color=Color.YELLOW)
                 ],
                 "Saint Louis": [
                     Route(length=5, color=Color.GREEN)
@@ -159,70 +168,106 @@ class GameState:
                     Route(length=2, color=Color.BLACK)
                 ],
                 "Raleigh": [
-                    Route(length=2, color=Color.GREEN)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
+                ],
+                "Pittsburgh": [
+                    Route(length=2, color=Color.GRAY)
                 ]
             },
             "Montreal": {
                 "Boston": [
-                    Route(length=2, color=Color.BLUE)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Toronto": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
+                ],
+                "New York": [
+                    Route(length=3, color=Color.BLUE)
                 ]
             },
             "Toronto": {
                 "Montreal": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "Pittsburgh": [
-                    Route(length=2, color=Color.WHITE)
+                    Route(length=2, color=Color.GRAY)
+                ],
+                "Chicago": [
+                    Route(length=4, color=Color.WHITE)
+                ],
+                "Sault St. Marie": [
+                    Route(length=2, color=Color.GRAY)
+                ],
+                "Duluth": [
+                    Route(length=6, color=Color.PINK)
                 ]
             },
             "Raleigh": {
                 "Washington": [
-                    Route(length=2, color=Color.GREEN)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Pittsburgh": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Charleston": [
-                    Route(length=2, color=Color.ORANGE)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Atlanta": [
-                    Route(length=2, color=Color.YELLOW)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
+                ],
+                "Nashville": [
+                    Route(length=3, color=Color.BLACK)
                 ]
             },
             "Charleston": {
                 "Raleigh": [
-                    Route(length=2, color=Color.ORANGE)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Atlanta": [
-                    Route(length=2, color=Color.BLUE)
+                    Route(length=2, color=Color.GRAY)
+                ],
+                "Miami": [
+                    Route(length=4, color=Color.PINK)
                 ]
             },
             "Atlanta": {
                 "Raleigh": [
-                    Route(length=2, color=Color.YELLOW)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Charleston": [
-                    Route(length=2, color=Color.BLUE)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Nashville": [
-                    Route(length=1, color=Color.ORANGE)
+                    Route(length=1, color=Color.GRAY)
                 ],
                 "Miami": [
                     Route(length=5, color=Color.BLUE)
+                ],
+                "New Orleans": [
+                    Route(length=4, color=Color.YELLOW),
+                    Route(length=4, color=Color.ORANGE)
                 ]
             },
             "Nashville": {
                 "Pittsburgh": [
-                    Route(length=3, color=Color.YELLOW)
+                    Route(length=4, color=Color.YELLOW)
                 ],
                 "Atlanta": [
-                    Route(length=1, color=Color.ORANGE)
+                    Route(length=1, color=Color.GRAY)
                 ],
                 "Saint Louis": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
+                ],
+                "Raleigh": [
+                    Route(length=3, color=Color.BLACK)
+                ],
+                "Little Rock": [
+                    Route(length=3, color=Color.WHITE)
                 ]
             },
             "Saint Louis": {
@@ -230,22 +275,28 @@ class GameState:
                     Route(length=5, color=Color.GREEN)
                 ],
                 "Nashville": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Kansas City": [
                     Route(length=2, color=Color.BLUE),
                     Route(length=2, color=Color.PINK)
                 ],
                 "Chicago": [
-                    Route(length=2, color=Color.GREEN)
+                    Route(length=2, color=Color.GREEN),
+                    Route(length=2, color=Color.WHITE)
+                ],
+                "Little Rock": [
+                    Route(length=2, color=Color.GRAY)
                 ]
             },
             "Chicago": {
                 "Saint Louis": [
-                    Route(length=2, color=Color.GREEN)
+                    Route(length=2, color=Color.GREEN),
+                    Route(length=2, color=Color.WHITE)
                 ],
                 "Pittsburgh": [
-                    Route(length=3, color=Color.ORANGE)
+                    Route(length=3, color=Color.ORANGE),
+                    Route(length=3, color=Color.BLACK)
                 ],
                 "Toronto": [
                     Route(length=4, color=Color.WHITE)
@@ -263,63 +314,82 @@ class GameState:
                     Route(length=2, color=Color.PINK)
                 ],
                 "Oklahoma City": [
-                    Route(length=2, color=Color.YELLOW),
-                    Route(length=2, color=Color.RED)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Denver": [
                     Route(length=4, color=Color.BLACK),
                     Route(length=4, color=Color.ORANGE)
                 ],
                 "Omaha": [
-                    Route(length=1, color=Color.BLACK)
+                    Route(length=1, color=Color.GRAY)
                 ]
             },
             "Oklahoma City": {
                 "Kansas City": [
-                    Route(length=2, color=Color.YELLOW),
-                    Route(length=2, color=Color.RED)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Dallas": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Little Rock": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Santa Fe": [
                     Route(length=3, color=Color.BLUE)
+                ],
+                "El Paso": [
+                    Route(length=5, color=Color.YELLOW)
+                ],
+                "Denver": [
+                    Route(length=4, color=Color.RED)
                 ]
             },
             "Dallas": {
                 "Oklahoma City": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Little Rock": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Houston": [
-                    Route(length=1, color=Color.BLACK)
+                    Route(length=1, color=Color.GRAY),
+                    Route(length=1, color=Color.GRAY)
+                ],
+                "El Paso": [
+                    Route(length=4, color=Color.RED)
                 ]
             },
             "Little Rock": {
                 "Oklahoma City": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Dallas": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Saint Louis": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "New Orleans": [
                     Route(length=3, color=Color.GREEN)
+                ],
+                "Nashville": [
+                    Route(length=3, color=Color.WHITE)
                 ]
             },
             "Houston": {
                 "Dallas": [
-                    Route(length=1, color=Color.BLACK)
+                    Route(length=1, color=Color.GRAY),
+                    Route(length=1, color=Color.GRAY)
                 ],
                 "New Orleans": [
-                    Route(length=2, color=Color.ORANGE)
+                    Route(length=2, color=Color.GRAY)
+                ],
+                "El Paso": [
+                    Route(length=6, color=Color.GREEN)
                 ]
             },
             "New Orleans": {
@@ -327,13 +397,14 @@ class GameState:
                     Route(length=3, color=Color.GREEN)
                 ],
                 "Houston": [
-                    Route(length=2, color=Color.ORANGE)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Miami": [
                     Route(length=6, color=Color.RED)
                 ],
                 "Atlanta": [
-                    Route(length=4, color=Color.YELLOW)
+                    Route(length=4, color=Color.YELLOW),
+                    Route(length=4, color=Color.ORANGE)
                 ]
             },
             "Miami": {
@@ -342,6 +413,9 @@ class GameState:
                 ],
                 "New Orleans": [
                     Route(length=6, color=Color.RED)
+                ],
+                "Charleston": [
+                    Route(length=4, color=Color.PINK)
                 ]
             },
             "Denver": {
@@ -353,7 +427,7 @@ class GameState:
                     Route(length=4, color=Color.RED)
                 ],
                 "Santa Fe": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Phoenix": [
                     Route(length=5, color=Color.WHITE)
@@ -364,42 +438,45 @@ class GameState:
                 ],
                 "Helena": [
                     Route(length=4, color=Color.GREEN)
+                ],
+                "Omaha": [
+                    Route(length=4, color=Color.PINK)
                 ]
             },
             "Santa Fe": {
                 "Denver": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Oklahoma City": [
                     Route(length=3, color=Color.BLUE)
                 ],
                 "Phoenix": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "El Paso": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ]
             },
             "Phoenix": {
                 "Santa Fe": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "Denver": [
                     Route(length=5, color=Color.WHITE)
                 ],
                 "Los Angeles": [
-                    Route(length=6, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "El Paso": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ]
             },
             "El Paso": {
                 "Phoenix": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "Santa Fe": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Houston": [
                     Route(length=6, color=Color.GREEN)
@@ -428,6 +505,9 @@ class GameState:
                 "San Francisco": [
                     Route(length=5, color=Color.ORANGE),
                     Route(length=5, color=Color.WHITE)
+                ],
+                "Portland": [
+                    Route(length=6, color=Color.BLUE)
                 ]
             },
             "Helena": {
@@ -446,6 +526,9 @@ class GameState:
                 "Winnipeg": [
                     Route(length=4, color=Color.BLUE)
                 ],
+                "Calgary": [
+                    Route(length=4, color=Color.GRAY)
+                ],
                 "Seattle": [
                     Route(length=6, color=Color.YELLOW)
                 ]
@@ -455,7 +538,8 @@ class GameState:
                     Route(length=4, color=Color.BLUE)
                 ],
                 "Kansas City": [
-                    Route(length=1, color=Color.BLACK)
+                    Route(length=1, color=Color.GRAY),
+                    Route(length=1, color=Color.GRAY)
                 ],
                 "Denver": [
                     Route(length=4, color=Color.PINK)
@@ -464,7 +548,8 @@ class GameState:
                     Route(length=5, color=Color.RED)
                 ],
                 "Duluth": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ]
             },
             "Duluth": {
@@ -472,7 +557,8 @@ class GameState:
                     Route(length=3, color=Color.RED)
                 ],
                 "Omaha": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY),
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Helena": [
                     Route(length=6, color=Color.ORANGE)
@@ -481,7 +567,7 @@ class GameState:
                     Route(length=4, color=Color.BLACK)
                 ],
                 "Sault St. Marie": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "Toronto": [
                     Route(length=6, color=Color.PINK)
@@ -495,18 +581,21 @@ class GameState:
                     Route(length=4, color=Color.BLUE)
                 ],
                 "Sault St. Marie": [
-                    Route(length=6, color=Color.BLACK)
+                    Route(length=6, color=Color.GRAY)
+                ],
+                "Calgary": [
+                    Route(length=6, color=Color.WHITE)
                 ]
             },
             "Sault St. Marie": {
                 "Duluth": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "Winnipeg": [
-                    Route(length=6, color=Color.BLACK)
+                    Route(length=6, color=Color.GRAY)
                 ],
                 "Toronto": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Montreal": [
                     Route(length=5, color=Color.BLACK)
@@ -517,15 +606,15 @@ class GameState:
                     Route(length=3, color=Color.ORANGE)
                 ],
                 "Los Angeles": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ]
             },
             "Los Angeles": {
                 "Las Vegas": [
-                    Route(length=2, color=Color.BLACK)
+                    Route(length=2, color=Color.GRAY)
                 ],
                 "Phoenix": [
-                    Route(length=6, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "El Paso": [
                     Route(length=6, color=Color.BLACK)
@@ -545,15 +634,18 @@ class GameState:
                     Route(length=3, color=Color.YELLOW)
                 ],
                 "Portland": [
-                    Route(length=5, color=Color.GREEN)
+                    Route(length=5, color=Color.GREEN),
+                    Route(length=5, color=Color.PINK)
                 ]
             },
             "Portland": {
                 "San Francisco": [
-                    Route(length=5, color=Color.GREEN)
+                    Route(length=5, color=Color.GREEN),
+                    Route(length=5, color=Color.PINK)
                 ],
                 "Seattle": [
-                    Route(length=1, color=Color.BLACK)
+                    Route(length=1, color=Color.GRAY),
+                    Route(length=1, color=Color.GRAY)
                 ],
                 "Salt Lake City": [
                     Route(length=6, color=Color.BLUE)
@@ -561,35 +653,38 @@ class GameState:
             },
             "Seattle": {
                 "Portland": [
-                    Route(length=1, color=Color.BLACK)
+                    Route(length=1, color=Color.GRAY),
+                    Route(length=1, color=Color.GRAY)
                 ],
                 "Helena": [
                     Route(length=6, color=Color.YELLOW)
                 ],
                 "Calgary": [
-                    Route(length=4, color=Color.BLACK)
+                    Route(length=4, color=Color.GRAY)
                 ],
                 "Vancouver": [
-                    Route(length=1, color=Color.BLACK)
+                    Route(length=1, color=Color.GRAY),
+                    Route(length=1, color=Color.GRAY)
                 ]
             },
             "Vancouver": {
                 "Seattle": [
-                    Route(length=1, color=Color.BLACK)
+                    Route(length=1, color=Color.GRAY),
+                    Route(length=1, color=Color.GRAY)
                 ],
                 "Calgary": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ]
             },
             "Calgary": {
                 "Vancouver": [
-                    Route(length=3, color=Color.BLACK)
+                    Route(length=3, color=Color.GRAY)
                 ],
                 "Seattle": [
-                    Route(length=4, color=Color.BLACK)
+                    Route(length=4, color=Color.GRAY)
                 ],
                 "Helena": [
-                    Route(length=4, color=Color.BLACK)
+                    Route(length=4, color=Color.GRAY)
                 ],
                 "Winnipeg": [
                     Route(length=6, color=Color.WHITE)
@@ -627,14 +722,21 @@ class GameState:
         routes: List[Route] = []
         routes.append(self.get_routes_between_cities(city1, city2))
         routes.append(self.get_routes_between_cities(city2, city1))
-        for route in routes:
-            if color == Color.WILD and not route[0].is_claimed():
-                route[0].claim(player)
-                route[1].claim(player)
+        
+        for direction in routes:
+            
+            claimed = direction[0].is_claimed() or direction[1].is_claimed()
+            if color == Color.WILD and not (claimed):
+                for route in direction:
+                    route.claim(player)
                 return True
-            if route[0].color == color and not route[0].is_claimed():
-                route[0].claim(player)
-                route[1].claim(player)
+            if direction[0].color == color and not (claimed):
+                for route in direction:
+                    route.claim(player)
+                return True
+            if direction[0].color == Color.GRAY and not (claimed):
+                for route in direction:
+                    route.claim(player)
                 return True
         return False
 
@@ -642,14 +744,15 @@ class GameState:
         """Get the length of a specific route."""
         routes = self.get_routes_between_cities(city1, city2)
         for route in routes:
-            if route.color == color:
-                return route.length
+            return route.length
         return None
 
-# General game class which stores players, current player index, train deck, destination deck, face-up cards, and board
+# General game class which stores players, current player index, train deck, destination deck, face-up cards
+# TODO - Implement final scoring
 class TicketToRide:
     def __init__(self):
         self.game_state = GameState()
+        self.god_mode = False
         
     def setup_game(self, players: List[Player]):
         self.game_state.players = players
@@ -664,8 +767,9 @@ class TicketToRide:
     def initialise_train_deck(self):
         # Add 12 of each color (excluding wild) and 14 wild cards
         for color in Color:
-            if color != Color.WILD:
+            if color != Color.WILD and color != Color.GRAY:
                 self.game_state.train_deck.extend([color] * 12)
+            
         self.game_state.train_deck.extend([Color.WILD] * 14)
         random.shuffle(self.game_state.train_deck)
         
@@ -677,7 +781,6 @@ class TicketToRide:
         for _ in range(4):
             card = self.game_state.train_deck.pop()
             player.train_cards[card] += 1
-        
         # Deal 3 destination cards, player must keep at least 2
         destinations = [self.game_state.destination_deck.pop() for _ in range(3)]
         # TODO - player must keep at least 2 & can discard 1
@@ -693,6 +796,8 @@ class TicketToRide:
         return [f"{destination.city1} to {destination.city2} ({destination.points})" for destination in player.destinations]
 
     def print_board(self):
+        self.visualizer = TicketToRideVisualizer(self.game_state)
+        self.visualizer.visualize_game_map()
         print("=== Ticket to Ride Board ===")
         for city1, connections in sorted(self.game_state.routes.items()):
             print(f"\n{city1}:")
@@ -708,19 +813,97 @@ class TicketToRide:
         
         for city1, city2, route in unclaimed_routes:
             # Check if player has enough cards to claim the route
+            # TODO allow combinations of wild and other colors
+            if route.color == Color.GRAY:
+                for color in Color:
+                    if player.train_cards[color] >= route.length:
+                        if available_routes.__contains__((city1, city2, route, color)): #if the route is already in the list, skip (avoids duplicates in case of multiple paths /wild cards)
+                            continue
+                        else:
+                            available_routes.append((city1, city2, route, color))
             if player.train_cards[Color.WILD] >= route.length:
-                # TODO allow combinations of wild and other colors
-                available_routes.append((city1, city2, route))
+                if available_routes.__contains__((city1, city2, route, Color.WILD)):
+                    continue
+                else:
+                    available_routes.append((city1, city2, route, Color.WILD))
             if player.train_cards[route.color] >= route.length:
-                available_routes.append((city1, city2, route))
+                if available_routes.__contains__((city1, city2, route, route.color)):
+                    continue
+                else:
+                    available_routes.append((city1, city2, route, route.color))
+                
         
         if available_routes:
             print("\nRoutes you can complete:")
-            for city1, city2, route in available_routes:
-                print(f"{city1} -> {city2} ({route.color} * {route.length})")
+            for city1, city2, route, color in available_routes:
+                print(f"{city1} -> {city2} ({color} * {route.length})")
         else:
             print("\nNo routes available to claim with your current cards.")
 
+    def find_path_between_cities(self,routes: Dict[str, Dict[str, List[Route]]], 
+                           start: str, 
+                           end: str,
+                           player_routes: Set[Tuple[str, str]]) -> bool:
+        # Queue for BFS - store the path to reach each city
+        queue = deque([(start, [start])])
+        # Keep track of visited cities
+        visited = {start}
+        
+        while queue:
+            current_city, path = queue.popleft()
+            
+            # If we've reached our destination
+            if current_city == end:
+                return True
+                
+            # If current city isn't in routes, skip
+            if current_city not in routes:
+                continue
+                
+            # Check all neighboring cities
+            for next_city in routes[current_city]:
+                # Check if the player owns this route (in either direction)
+                route_owned = (current_city, next_city) in player_routes or \
+                            (next_city, current_city) in player_routes
+                
+                if route_owned and next_city not in visited:
+                    visited.add(next_city)
+                    queue.append((next_city, path + [next_city]))
+                    
+        return False
+
+    def check_all_destinations(self,game_state, player) -> List[Tuple[Destination, bool]]:
+        # Create a set of player-owned routes
+        player_routes = set()
+        for route in player.claimed_connections:
+            # Add both directions since routes can be traversed both ways
+            player_routes.add((route[0], route[1]))
+            player_routes.add((route[1], route[0]))
+        
+        results = []
+        for destination in player.destinations:
+            is_completed = self.find_path_between_cities(
+                game_state.routes,
+                destination.city1,
+                destination.city2,
+                player_routes
+            )
+            results.append((destination, is_completed))
+            
+        return results
+
+    def destination_completion_check(self, player: Player):
+        results = self.check_all_destinations(self.game_state, player)
+        
+        completed_count = 0
+        for destination, is_completed in results:
+            status = "completed" if is_completed else "not completed"
+            print(f"Destination {destination.city1} to {destination.city2} is {status}")
+            if is_completed:
+                completed_count += 1
+                
+        print(f"\nTotal completed destinations: {completed_count}/{len(results)}")
+        
     def play_turn(self, player: Player):
         print("\n" + "_" * 200)
         print(f"Turn {player.turn}" + "\n")
@@ -735,6 +918,8 @@ class TicketToRide:
             self.draw_train_cards(player)
         elif choice == "2":
             self.handle_claim_route(player)
+            if self.god_mode:
+                self.play_turn(player)
         elif choice == "3":
             self.draw_destination_tickets(player)
         elif choice == "4":
@@ -745,6 +930,15 @@ class TicketToRide:
             self.play_turn(player)
         elif choice == "6":
             print(f"{player.name}'s score: {player.points}")
+            self.play_turn(player)
+        elif choice == "7": #temporary testing
+            self.destination_completion_check(player)
+            self.play_turn(player)
+        elif choice == "godmode":
+            # testing cheats
+            self.god_mode = True
+            self.game_state.players[0].train_cards[Color.WILD] += 100
+            self.game_state.players[1].train_cards[Color.WILD] += 100
             self.play_turn(player)
         elif choice == "exit":
             exit()
@@ -778,8 +972,14 @@ class TicketToRide:
         route = routes[0]
         if route.claimed_by is None:
             # TODO allow player to use a combination of wild and other colors
+            if route.color == Color.GRAY:
+                for color in Color:
+                    if player.train_cards[color] >= route.length:
+                        available_colors.append(color)
             if player.train_cards[route.color] >= route.length:
                 available_colors.append(route.color)
+            
+
             if player.train_cards[Color.WILD] >= route.length:
                 available_colors.append(Color.WILD)
 
@@ -803,11 +1003,13 @@ class TicketToRide:
                 return
         else:
             color = available_colors[0]
-
         if self.game_state.claim_route(city1, city2, color, player.name):
             # Remove cards from player's hand
-            route_length = next(route.length for route in routes if route.color == color)
-            player.train_cards[color] -= route_length
+            route_length = self.game_state.get_route_length(city1, city2, color)
+            if color == Color.WILD:
+                player.train_cards[Color.WILD] -= route_length
+            else:
+                player.train_cards[color] -= route_length
             player.claimed_connections.append((city1, city2, color))
             player.points += route_length
             print(f"{player.name} has claimed the route between {city1} and {city2} with {color}")
@@ -871,6 +1073,8 @@ class TicketToRide:
 
         player.destinations.extend(to_keep)
         print(f"{player.name}'s current destinations: {', '.join(self.formatted_destinations(player))}")
+
+    
 
 def main():
     game = TicketToRide()
