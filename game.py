@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Set, Tuple
 from enum import Enum
 import random
+import copy
+from mcts import MCTS
 
 from graph import TicketToRideVisualizer
 
@@ -68,7 +70,7 @@ class Route:
 # Handles the game state, including the board, players, current player index, score, train deck, destination deck, and face-up cards
 class GameState:
     def __init__(self):
-        # TODO - put this into a function
+        # TODO - put this into a function maybe
         self.routes = {}
         self.players: List[Player] = []
         self.current_player_idx: int = 0
@@ -160,6 +162,9 @@ class GameState:
                 ],
                 "Saint Louis": [
                     Route(length=5, color=Color.GREEN)
+                ],
+                "Toronto": [
+                    Route(length=2, color=Color.GRAY)
                 ]
             },
             "Washington": {
@@ -185,6 +190,9 @@ class GameState:
                 ],
                 "New York": [
                     Route(length=3, color=Color.BLUE)
+                ],
+                "Sault St. Marie": [
+                    Route(length=5, color=Color.BLACK)
                 ]
             },
             "Toronto": {
@@ -724,7 +732,8 @@ class GameState:
         routes.append(self.get_routes_between_cities(city2, city1))
         
         for direction in routes:
-            
+            # i somehow made this a way of testing whether i put in the routes correctly
+            # because if it doesnt go both ways its gonna crash :P thanks MCTS
             claimed = direction[0].is_claimed() or direction[1].is_claimed()
             if color == Color.WILD and not (claimed):
                 for route in direction:
@@ -746,6 +755,99 @@ class GameState:
         for route in routes:
             return route.length
         return None
+    
+    def setup_train_deck(self):
+        for color in Color:
+            if color != Color.WILD and color != Color.GRAY:
+                self.train_deck.extend([color] * 12)
+            
+        self.train_deck.extend([Color.WILD] * 14)
+        random.shuffle(self.train_deck)
+
+    def draw_train_face(self, i: int, card: Color, player: str):
+        """Draw a face-up card."""
+        self.face_up_cards.pop(i)
+        if self.train_deck.__len__() == 0:
+            self.setup_train_deck()
+        self.face_up_cards.append(self.train_deck.pop())
+        self.players[self.current_player_idx].train_cards[card] += 1
+    
+    def draw_train_deck(self, player: str):
+        """Draw a card from the train deck."""
+        if self.train_deck.__len__() == 0:
+            self.setup_train_deck()
+        card = self.train_deck.pop()
+        self.players[self.current_player_idx].train_cards[card] += 1
+
+    # MCTS methods
+    def copy(self):
+        # Create a deep copy of the game state
+        new_state = GameState()
+        new_state.routes = copy.deepcopy(self.routes)
+        new_state.players = copy.deepcopy(self.players)
+        new_state.current_player_idx = self.current_player_idx
+        new_state.score = copy.deepcopy(self.score)
+        new_state.train_deck = copy.deepcopy(self.train_deck)
+        new_state.destination_deck = copy.deepcopy(self.destination_deck)
+        new_state.face_up_cards = copy.deepcopy(self.face_up_cards)
+        return new_state
+    
+    def apply_action(self, action):
+        action_type = action[0]
+        if action_type == "draw_train_face":
+            idx, card, player_name = action[1:]
+            self.draw_train_face(idx, card, player_name)
+        elif action_type == "draw_train_deck":
+            player_name = action[1]
+            self.draw_train_deck(player_name)
+        elif action_type == "claim_route":
+            city1, city2, color, player_name = action[1:]
+            self.claim_route(city1, city2, color, player_name)
+            route_length = self.get_route_length(city1, city2, color)
+            if color == Color.WILD:
+                self.players[0].train_cards[Color.WILD] -= route_length
+            else:
+                self.players[0].train_cards[color] -= route_length
+            self.players[0].claimed_connections.append((city1, city2, color))
+            self.players[0].points += route_length
+            self.players[0].remaining_trains -= route_length
+    
+    def is_end(self):
+        # Check if the game state is terminal
+        if (self.players[0].remaining_trains <= 2):
+            return True
+        return False
+    
+    def get_legal_actions(self):
+        # TODO Needs modifications
+        legal_actions = []
+        current_player = self.players[self.current_player_idx]
+        unclaimed_routes = self.get_unclaimed_routes()
+        for city1, city2, route in unclaimed_routes:
+            if route.color == Color.GRAY:
+                for color in Color:
+                    if current_player.train_cards[color] >= route.length:
+                        legal_actions.append(("claim_route",city1, city2, color, current_player.name))
+            if current_player.train_cards[route.color] >= route.length:
+                legal_actions.append(("claim_route",city1, city2, route.color, current_player.name))
+            if current_player.train_cards[Color.WILD] >= route.length:
+                legal_actions.append(("claim_route",city1, city2, Color.WILD, current_player.name))
+        
+        num_cards = sum(current_player.train_cards.values())
+        if num_cards<=15:
+            # Draw face up cards
+            for i, card in enumerate(self.face_up_cards):
+                legal_actions.append(("draw_train_face", i, card, current_player.name))
+            
+            # Draw random
+            legal_actions.append(("draw_train_deck", current_player.name))
+        else:
+            pass
+        
+        return legal_actions
+    
+    def game_result(self):
+        return self.players[0].points
 
 # General game class which stores players, current player index, train deck, destination deck, face-up cards
 # TODO - Implement final scoring
@@ -766,12 +868,7 @@ class TicketToRide:
             
     def initialise_train_deck(self):
         # Add 12 of each color (excluding wild) and 14 wild cards
-        for color in Color:
-            if color != Color.WILD and color != Color.GRAY:
-                self.game_state.train_deck.extend([color] * 12)
-            
-        self.game_state.train_deck.extend([Color.WILD] * 14)
-        random.shuffle(self.game_state.train_deck)
+        self.game_state.setup_train_deck()
         
         # Draw initial face-up cards
         self.game_state.face_up_cards = [self.game_state.train_deck.pop() for _ in range(5)]
@@ -1074,8 +1171,6 @@ class TicketToRide:
         player.destinations.extend(to_keep)
         print(f"{player.name}'s current destinations: {', '.join(self.formatted_destinations(player))}")
 
-    
-
 def main():
     game = TicketToRide()
     
@@ -1092,12 +1187,21 @@ def main():
     print("You can type back to go to the previous menu option")
     print("Enjoy Ticket to Ride!")
     
+    # Instantiate MCTS for Player 1
+    mcts_player = MCTS(game.game_state)
+    
     # Main game loop
     game_end = False
     while not game_end:
         current_player = game.game_state.players[game.game_state.current_player_idx]
         
-        game.play_turn(current_player)
+        if current_player.name == "Player 1":
+            # Use MCTS to determine the best action for Player 1
+            best_action = mcts_player.best_action(simulations_number=1000)
+            game.game_state.apply_action(best_action)
+        else:
+            # Let Player 2 play their turn manually
+            game.play_turn(current_player)
 
         game.game_state.current_player_idx = (game.game_state.current_player_idx + 1) % len(game.game_state.players)
         
