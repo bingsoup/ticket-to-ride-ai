@@ -1,5 +1,6 @@
 from collections import deque
 from dataclasses import dataclass
+import time
 from typing import List, Dict, Optional, Set, Tuple
 from enum import Enum
 import random
@@ -78,7 +79,7 @@ class GameState:
         self.train_deck: List[Color] = []
         self.destination_deck: List[Destination] = []
         self.face_up_cards: List[Color] = []
-        self.visualizer = None
+        self.visualizer = TicketToRideVisualizer(self)
 
     def initialise_destination_deck(self):
         # Add destination tickets to the deck
@@ -725,28 +726,34 @@ class GameState:
                         unclaimed.append((city1, city2, route))
         return unclaimed
 
+    def claim_route_helper(self, color: Color, player: str, routes) -> bool:
+        for route in routes:
+            claimed = route.is_claimed()
+            if color == Color.WILD and not (claimed):
+                route.claim(player)
+                return True
+            if route.color == color and not (claimed):
+                route.claim(player)
+                return True
+            if route.color == Color.GRAY and not (claimed):
+                route.claim(player) 
+                return True
+            return False
+
     def claim_route(self, city1: str, city2: str, color: Color, player: str) -> bool:
         """Attempt to claim a route between two cities."""
-        routes: List[Route] = []
-        routes.append(self.get_routes_between_cities(city1, city2))
-        routes.append(self.get_routes_between_cities(city2, city1))
-        
-        for direction in routes:
-            # i somehow made this a way of testing whether i put in the routes correctly
-            # because if it doesnt go both ways its gonna crash :P thanks MCTS
-            claimed = direction[0].is_claimed() or direction[1].is_claimed()
-            if color == Color.WILD and not (claimed):
-                for route in direction:
-                    route.claim(player)
-                return True
-            if direction[0].color == color and not (claimed):
-                for route in direction:
-                    route.claim(player)
-                return True
-            if direction[0].color == Color.GRAY and not (claimed):
-                for route in direction:
-                    route.claim(player)
-                return True
+        routes = self.get_routes_between_cities(city1, city2)
+        if len(routes) == 4:
+            direction1 = [routes[0],routes[2]]
+            d1 = self.claim_route_helper(color, player, direction1)
+            direction2 = [routes[1], routes[3]]
+            d2 = self.claim_route_helper(color, player, direction2)
+            return d1 or d2
+        else: # Only one direction so can claim both
+            if self.claim_route_helper(color, player, routes): return True
+              
+        #print(f"Failed to claim route between {city1} and {city2} with {color}")
+        #print (f"Color: {color} is not valid for route between {city1} and {city2}")
         return False
 
     def get_route_length(self, city1: str, city2: str, color: Color) -> Optional[int]:
@@ -779,47 +786,128 @@ class GameState:
         card = self.train_deck.pop()
         self.players[self.current_player_idx].train_cards[card] += 1
 
+    def find_path_between_cities(self,routes: Dict[str, Dict[str, List[Route]]], 
+                           start: str, 
+                           end: str,
+                           player_routes: Set[Tuple[str, str]]) -> bool:
+        # Queue for BFS - store the path to reach each city
+        queue = deque([(start, [start])])
+        # Keep track of visited cities
+        visited = {start}
+        
+        while queue:
+            current_city, path = queue.popleft()
+            
+            # If we've reached our destination
+            if current_city == end:
+                print('->'.join(path))
+                return True
+                
+            # If current city isn't in routes, skip
+            if current_city not in routes:
+                continue
+                
+            # Check all neighboring cities
+            for next_city in routes[current_city]:
+                # Check if the player owns this route (in either direction)
+                route_owned = (current_city, next_city) in player_routes or \
+                            (next_city, current_city) in player_routes
+                
+                if route_owned and next_city not in visited:
+                    visited.add(next_city)
+                    queue.append((next_city, path + [next_city]))
+                    
+        return False
+
+    def check_all_destinations(self, player) -> List[Tuple[Destination, bool]]:
+        # Create a set of player-owned routes
+        player_routes = set()
+        for route in player.claimed_connections:
+            # Add both directions since routes can be traversed both ways
+            player_routes.add((route[0], route[1]))
+            player_routes.add((route[1], route[0]))
+        
+        results = []
+        for destination in player.destinations:
+            is_completed = self.find_path_between_cities(
+                self.routes,
+                destination.city1,
+                destination.city2,
+                player_routes
+            )
+            results.append((destination, is_completed))
+            
+        return results
+    
+    def calc_route_points(self, route_length: int) -> int:
+        if route_length == 1:
+            return 1
+        elif route_length == 2:
+            return 2
+        elif route_length == 3:
+            return 4
+        elif route_length == 4:
+            return 7
+        elif route_length == 5:
+            return 10
+        elif route_length == 6:
+            return 15
+    
     # MCTS methods
     def copy(self):
         # Create a deep copy of the game state
         new_state = GameState()
-        new_state.routes = copy.deepcopy(self.routes)
-        new_state.players = copy.deepcopy(self.players)
-        new_state.current_player_idx = self.current_player_idx
-        new_state.score = copy.deepcopy(self.score)
-        new_state.train_deck = copy.deepcopy(self.train_deck)
-        new_state.destination_deck = copy.deepcopy(self.destination_deck)
-        new_state.face_up_cards = copy.deepcopy(self.face_up_cards)
+        new_state = copy.deepcopy(self)
         return new_state
     
     def apply_action(self, action):
         action_type = action[0]
-        if action_type == "draw_train_face":
-            idx, card, player_name = action[1:]
-            self.draw_train_face(idx, card, player_name)
-        elif action_type == "draw_train_deck":
-            player_name = action[1]
-            self.draw_train_deck(player_name)
+        if action_type == "draw_two_train_cards":
+            idx1, card1, idx2, card2, player_name = action[1:]
+            if card1 != "deck":
+                self.draw_train_face(idx1, card1, player_name)
+            else:
+                self.draw_train_deck(player_name)
+            if card2 != "deck":
+                self.draw_train_face(idx2, card2, player_name)
+            else:
+                self.draw_train_deck(player_name)
         elif action_type == "claim_route":
             city1, city2, color, player_name = action[1:]
-            self.claim_route(city1, city2, color, player_name)
-            route_length = self.get_route_length(city1, city2, color)
-            if color == Color.WILD:
-                self.players[0].train_cards[Color.WILD] -= route_length
+            if self.claim_route(city1, city2, color, player_name):
+                route_length = self.get_route_length(city1, city2, color)
+                if color == Color.WILD:
+                    self.players[self.current_player_idx].train_cards[Color.WILD] -= route_length
+                else:
+                    self.players[self.current_player_idx].train_cards[color] -= route_length
+                self.players[self.current_player_idx].claimed_connections.append((city1, city2, color))
+                self.players[self.current_player_idx].points += self.calc_route_points(route_length)
+                if route_length >= 4:
+                    #print("long route attempted at length", route_length)
+                    pass
+                self.players[self.current_player_idx].remaining_trains -= route_length
             else:
-                self.players[0].train_cards[color] -= route_length
-            self.players[0].claimed_connections.append((city1, city2, color))
-            self.players[0].points += route_length
-            self.players[0].remaining_trains -= route_length
+                pass
+
+    def apply_action_final(self, action):
+        self.apply_action(action)
+        action_type = action[0]
+        if action_type == "draw_two_train_cards":
+            idx1, card1, idx2, card2, player_name = action[1:]
+            print(f"{player_name} has drawn two train cards: {card1}, {card2}")
+        elif action_type == "claim_route":
+            city1, city2, color, player_name = action[1:]
+            print(f"{player_name} has claimed a route between {city1} and {city2} with {color}")
+            
     
     def is_end(self):
         # Check if the game state is terminal
-        if (self.players[0].remaining_trains <= 2):
+        if (self.players[self.current_player_idx].remaining_trains <= 2):
             return True
         return False
     
     def get_legal_actions(self):
-        # TODO Needs modifications
+        # TODO Need to support adding destination tickets
         legal_actions = []
         current_player = self.players[self.current_player_idx]
         unclaimed_routes = self.get_unclaimed_routes()
@@ -834,20 +922,38 @@ class GameState:
                 legal_actions.append(("claim_route",city1, city2, Color.WILD, current_player.name))
         
         num_cards = sum(current_player.train_cards.values())
-        if num_cards<=15:
-            # Draw face up cards
-            for i, card in enumerate(self.face_up_cards):
-                legal_actions.append(("draw_train_face", i, card, current_player.name))
-            
-            # Draw random
-            legal_actions.append(("draw_train_deck", current_player.name))
-        else:
-            pass
-        
+        if num_cards <= 15:
+        # Draw two train cards. Enumerate all possible combinations of face-up cards and deck cards
+            for i, card1 in enumerate(self.face_up_cards):
+                for j, card2 in enumerate(self.face_up_cards):
+                    if i != j:
+                        legal_actions.append(("draw_two_train_cards", i, card1, j, card2, current_player.name))
+                legal_actions.append(("draw_two_train_cards", i, card1, "deck", "deck", current_player.name))
+            legal_actions.append(("draw_two_train_cards", "deck", "deck", "deck", "deck", current_player.name))
+    
         return legal_actions
     
-    def game_result(self):
-        return self.players[0].points
+    def game_result(self,game_num):
+        #print(f"Game {game_num}:")
+        for player in self.players:
+            #print(f"Score {player.name}: {player.points}")
+            destination_results = self.check_all_destinations(player)
+            for destination, is_complete in destination_results:
+                if is_complete:
+                    player.points += destination.points
+                    #print(f"Destination between {destination.city1} and {destination.city2} has been completed. Total score: {player.points}")
+            return player.points
+    
+    def game_result_final(self,game_num):
+        print(f"Game {game_num}:")
+        for player in self.players:
+            print(f"Score {player.name}: {player.points}")
+            destination_results = self.check_all_destinations(player)
+            for destination, is_complete in destination_results:
+                if is_complete:
+                    player.points += destination.points
+                    print(f"Destination between {destination.city1} and {destination.city2} has been completed. Total score: {player.points}")
+           
 
 # General game class which stores players, current player index, train deck, destination deck, face-up cards
 # TODO - Implement final scoring
@@ -937,60 +1043,8 @@ class TicketToRide:
         else:
             print("\nNo routes available to claim with your current cards.")
 
-    def find_path_between_cities(self,routes: Dict[str, Dict[str, List[Route]]], 
-                           start: str, 
-                           end: str,
-                           player_routes: Set[Tuple[str, str]]) -> bool:
-        # Queue for BFS - store the path to reach each city
-        queue = deque([(start, [start])])
-        # Keep track of visited cities
-        visited = {start}
-        
-        while queue:
-            current_city, path = queue.popleft()
-            
-            # If we've reached our destination
-            if current_city == end:
-                return True
-                
-            # If current city isn't in routes, skip
-            if current_city not in routes:
-                continue
-                
-            # Check all neighboring cities
-            for next_city in routes[current_city]:
-                # Check if the player owns this route (in either direction)
-                route_owned = (current_city, next_city) in player_routes or \
-                            (next_city, current_city) in player_routes
-                
-                if route_owned and next_city not in visited:
-                    visited.add(next_city)
-                    queue.append((next_city, path + [next_city]))
-                    
-        return False
-
-    def check_all_destinations(self,game_state, player) -> List[Tuple[Destination, bool]]:
-        # Create a set of player-owned routes
-        player_routes = set()
-        for route in player.claimed_connections:
-            # Add both directions since routes can be traversed both ways
-            player_routes.add((route[0], route[1]))
-            player_routes.add((route[1], route[0]))
-        
-        results = []
-        for destination in player.destinations:
-            is_completed = self.find_path_between_cities(
-                game_state.routes,
-                destination.city1,
-                destination.city2,
-                player_routes
-            )
-            results.append((destination, is_completed))
-            
-        return results
-
     def destination_completion_check(self, player: Player):
-        results = self.check_all_destinations(self.game_state, player)
+        results = self.game_state.check_all_destinations(player)
         
         completed_count = 0
         for destination, is_completed in results:
@@ -1043,8 +1097,6 @@ class TicketToRide:
             print("Invalid choice, please try again.")
             self.play_turn(player)
         
-        for player in self.game_state.players:
-            player.turn += 1
 
     def handle_claim_route(self, player: Player):
         print("Choose a route to claim:")
@@ -1108,7 +1160,7 @@ class TicketToRide:
             else:
                 player.train_cards[color] -= route_length
             player.claimed_connections.append((city1, city2, color))
-            player.points += route_length
+            player.points += self.game_state.calc_route_points(route_length)
             print(f"{player.name} has claimed the route between {city1} and {city2} with {color}")
         else:
             print("Failed to claim route.")
@@ -1177,9 +1229,9 @@ def main():
     # Create players
     players = [
         Player(name="Player 1", train_cards={color: 0 for color in Color}, 
-            destinations=[], claimed_connections=[], points=0, turn=0),
+            destinations=[], claimed_connections=[], points=0, turn=1),
         Player(name="Player 2", train_cards={color: 0 for color in Color}, 
-            destinations=[], claimed_connections=[], points=0, turn=0)
+            destinations=[], claimed_connections=[], points=0, turn=1)
     ]
     print("\n" + "_" * 200 + "\n")
     # Set up and start the game
@@ -1187,22 +1239,33 @@ def main():
     print("You can type back to go to the previous menu option")
     print("Enjoy Ticket to Ride!")
     
-    # Instantiate MCTS for Player 1
-    mcts_player = MCTS(game.game_state)
+    
     
     # Main game loop
     game_end = False
     while not game_end:
+        # Instantiate MCTS for Player 1
+        mcts_player = MCTS(game.game_state)
+        mcts_player2 = MCTS(game.game_state)
         current_player = game.game_state.players[game.game_state.current_player_idx]
         
         if current_player.name == "Player 1":
             # Use MCTS to determine the best action for Player 1
-            best_action = mcts_player.best_action(simulations_number=1000)
-            game.game_state.apply_action(best_action)
+            best_action = mcts_player.best_action(simulations_number=20)
+            game.game_state.apply_action_final(best_action)
+        elif current_player.name == "Player 2":
+            best_action = mcts_player2.best_action(simulations_number=20)
+            game.game_state.apply_action_final(best_action)
+        """
         else:
             # Let Player 2 play their turn manually
             game.play_turn(current_player)
-
+        """
+        
+        for player in game.game_state.players:
+            player.turn += 1
+        print(f"\nTurn: {player.turn}")
+        
         game.game_state.current_player_idx = (game.game_state.current_player_idx + 1) % len(game.game_state.players)
         
         # Check end game condition
@@ -1210,7 +1273,10 @@ def main():
             game_end = True
     
     # Calculate final scores
-    game.calculate_final_scores()
+    game.game_state.game_result_final(1)
+    game.game_state.visualizer = TicketToRideVisualizer(game.game_state)
+    game.game_state.visualizer.visualize_game_map()
 
+    print("End of game")
 if __name__ == "__main__":
     main()

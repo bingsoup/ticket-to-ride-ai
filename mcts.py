@@ -14,8 +14,6 @@ class MCTSNode:
 
     def is_fully_expanded(self):
         possible_actions = self.next_state.get_legal_actions()
-        lenp = len(possible_actions)
-        lench = len(self.children)
         return len(self.children) >= len(possible_actions)
 
     def expand(self):
@@ -23,7 +21,6 @@ class MCTSNode:
         possible_actions = self.next_state.get_legal_actions()
         # Filter out actions that have already been tried (i.e., have corresponding child nodes)
         untried_actions = [action for action in possible_actions if action not in [child.action for child in self.children]]
-        child_actions = [child.action for child in self.children]
         if len(untried_actions) == 0:
             return None
         action = random.choice(untried_actions)
@@ -33,22 +30,22 @@ class MCTSNode:
         self.children.append(child_node)
         return child_node
 
-    def best_child(self, c_param=1.4):
+    def best_child(self, c_param=15): # TODO Area of improvement - Experiment with c_param
         choices_weights = [
             (child.value / child.visits) + c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
             for child in self.children
         ]
         return self.children[choices_weights.index(max(choices_weights))]
 
-    def rollout(self):
+    def rollout(self, sim_num):
         current_rollout_state = self.state.copy()
         while not current_rollout_state.is_end():
             possible_moves = current_rollout_state.get_legal_actions()
             action = self.rollout_policy(possible_moves)
             current_rollout_state.apply_action(action)
-        return current_rollout_state.game_result()
+        return current_rollout_state.game_result(sim_num + 1)
 
-    def rollout_policy(self, possible_moves):
+    def rollout_policy(self, possible_moves): # TODO Area of improvement - Heuristics
         return random.choice(possible_moves)
 
     def backpropagate(self, result):
@@ -62,14 +59,13 @@ class MCTS:
         self.root = MCTSNode(game_state)
 
     def best_action(self, simulations_number):
-        for _ in range(simulations_number):
+        for sim_num in range(simulations_number):
             v = self.tree_policy()
-            reward = v.rollout()
+            reward = v.rollout(sim_num)
             v.backpropagate(reward)
-        print(self.root.best_child(c_param=0).action)
-        return self.root.best_child(c_param=0).action
+        return self.root.best_child().action
 
-    def tree_policy(self):
+    def tree_policy(self): # TODO Area of improvement - Pruning methods etc.
         current_node = self.root
         while not current_node.state.is_end():
             if not current_node.is_fully_expanded():

@@ -40,6 +40,5 @@ class TicketToRideVisualizer:
 
         # Save the plot
         plt.savefig("ticket_to_ride_map.png")
-        print("Game map saved as 'ticket_to_ride_map.png'.")
         plt.show()
         return 0
