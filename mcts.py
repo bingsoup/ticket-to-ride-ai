@@ -30,7 +30,7 @@ class MCTSNode:
         self.children.append(child_node)
         return child_node
 
-    def best_child(self, c_param=15): # TODO Area of improvement - Experiment with c_param
+    def best_child(self, c_param=4): # TODO Area of improvement - Experiment with c_param
         choices_weights = [
             (child.value / child.visits) + c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
             for child in self.children
@@ -46,6 +46,7 @@ class MCTSNode:
         return current_rollout_state.game_result(sim_num + 1)
 
     def rollout_policy(self, possible_moves): # TODO Area of improvement - Heuristics
+        
         return random.choice(possible_moves)
 
     def backpropagate(self, result):
