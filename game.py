@@ -96,6 +96,19 @@ class UnionFind:
 
     def is_connected(self, city1, city2):
         return self.find(city1) == self.find(city2)
+    
+# Hash map to store a list of adjacent cities for each destination endpoint (its just a map...)
+class HashMap:
+    def __init__(self):
+        self.map = {}
+
+    def add(self, city1, city2):
+        if city1 not in self.map:
+            self.map[city1] = []
+        self.map[city1].append(city2)
+    
+    def get(self, city):
+        return self.map.get(city, [])
 
 # Handles the game state, including the board, players, current player index, score, train deck, destination deck, and face-up cards
 class GameState:
@@ -109,11 +122,24 @@ class GameState:
         self.face_up_cards: List[Color] = []
         self.visualizer = TicketToRideVisualizer(self)
         self.union_find = None
+        self.hash_map = None
     
     def init(self):
         self.initialise_destination_deck()
         self.initialise_routes()
         self.union_find = UnionFind(self.routes.keys())
+        
+        # Add 12 of each color (excluding wild) and 14 wild cards
+        self.setup_train_deck()
+        # Draw initial face-up cards
+        self.face_up_cards = [self.game_state.train_deck.pop() for _ in range(5)]
+
+    def init_hash(self):
+        self.hash_map = HashMap()
+        for player in self.players:
+            for destination in player.destinations:
+                self.hash_map.add(destination.city1, destination.city2)
+                self.hash_map.add(destination.city2, destination.city1)
 
     def initialise_destination_deck(self):
         # Add destination tickets to the deck
@@ -929,9 +955,9 @@ class GameState:
         missing_routes = []
         player = self.players[self.current_player_idx]
         for destination in player.destinations:
+            
             return False
 
-    
     def game_result(self,game_num):
         #print(f"Game {game_num}:")
         player = self.players[self.current_player_idx]
@@ -973,18 +999,11 @@ class TicketToRide:
     def setup_game(self, players: List[Player]):
         self.game_state.players = players
         self.game_state.init()
-        self.initialise_train_deck()
-        
         # Deal initial cards to each player
         for player in self.game_state.players:
             self.deal_initial_cards(player)
-            
-    def initialise_train_deck(self):
-        # Add 12 of each color (excluding wild) and 14 wild cards
-        self.game_state.setup_train_deck()
         
-        # Draw initial face-up cards
-        self.game_state.face_up_cards = [self.game_state.train_deck.pop() for _ in range(5)]
+        self.game_state.init_hash()
     
     def deal_initial_cards(self, player: Player):
         # Deal 4 train cards to each player

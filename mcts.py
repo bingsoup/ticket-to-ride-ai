@@ -46,7 +46,6 @@ class MCTSNode:
         return current_rollout_state.game_result(sim_num + 1)
 
     def rollout_policy(self, possible_moves): # TODO Area of improvement - Heuristics
-        
         return random.choice(possible_moves)
 
     def backpropagate(self, result):
