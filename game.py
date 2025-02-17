@@ -8,6 +8,7 @@ import copy
 from mcts import MCTS
 from console import LiveConsole
 from graph import TicketToRideVisualizer
+from fw import FloydWarshall
 
 class Color(Enum):
     RED = "red"
@@ -21,12 +22,32 @@ class Color(Enum):
     GRAY = "gray"
     WILD = "wild"
 
-# City class to store city name and connections
-@dataclass
-class City:
-    name: str
-    connections: Dict[str, List[Tuple[int, Color]]]  # city_name -> [(length, color)]
+# Disjointed set for efficient connectivity checking
+class UnionFind:
+    def __init__(self, cities):
+        self.parent = {city: city for city in cities}
+        self.rank = {city: 1 for city in cities}
 
+    def find(self, city):
+        if self.parent[city] != city:
+            self.parent[city] = self.find(self.parent[city])  # Path compression
+        return self.parent[city]
+
+    def union(self, city1, city2):
+        root1 = self.find(city1)
+        root2 = self.find(city2)
+        if root1 != root2:
+            if self.rank[root1] > self.rank[root2]:
+                self.parent[root2] = root1
+            elif self.rank[root1] < self.rank[root2]:
+                self.parent[root1] = root2
+            else:
+                self.parent[root2] = root1
+                self.rank[root1] += 1
+
+    def is_connected(self, city1, city2):
+        return self.find(city1) == self.find(city2)
+    
 # Destination class to store destination cities and points
 @dataclass
 class Destination:
@@ -42,8 +63,10 @@ class Player:
     train_cards: Dict[Color, int] = None
     destinations: List[Destination] = None
     claimed_connections: List[Tuple[str, str, Color]] = None
+    claimed_cities: Set[str] = None
     points: int = 0
     turn: int = 1
+    uf: UnionFind = None
     
     def __post_init__(self):
         if self.train_cards is None:
@@ -52,9 +75,14 @@ class Player:
             self.destinations = []
         if self.claimed_connections is None:
             self.claimed_connections = []
+        if self.claimed_cities is None:
+            self.claimed_cities = set()
         
     def getTrainCards(self) -> List[Tuple[Color, int]]:
         return [(color, count) for color, count in self.train_cards.items() if count > 0]
+    
+    def getClaimedCity(self,city: str) -> bool:
+        return city in self.claimed_cities
 
 @dataclass
 class Route:
@@ -70,76 +98,35 @@ class Route:
     
 console = LiveConsole()
 
-# Disjointed set for efficient connectivity checking
-class UnionFind:
-    def __init__(self, cities):
-        self.parent = {city: city for city in cities}  # Each city is its own parent
-        self.rank = {city: 1 for city in cities}       # Used for union by rank
-
-    def find(self, city):
-        if self.parent[city] != city:
-            self.parent[city] = self.find(self.parent[city])  # Path compression
-        return self.parent[city]
-
-    def union(self, city1, city2):
-        root1 = self.find(city1)
-        root2 = self.find(city2)
-
-        if root1 != root2:  # If they're not already connected
-            if self.rank[root1] > self.rank[root2]:
-                self.parent[root2] = root1
-            elif self.rank[root1] < self.rank[root2]:
-                self.parent[root1] = root2
-            else:
-                self.parent[root2] = root1
-                self.rank[root1] += 1  # Increase rank
-
-    def is_connected(self, city1, city2):
-        return self.find(city1) == self.find(city2)
-    
-# Hash map to store a list of adjacent cities for each destination endpoint (its just a map...)
-class HashMap:
-    def __init__(self):
-        self.map = {}
-
-    def add(self, city1, city2):
-        if city1 not in self.map:
-            self.map[city1] = []
-        self.map[city1].append(city2)
-    
-    def get(self, city):
-        return self.map.get(city, [])
-
 # Handles the game state, including the board, players, current player index, score, train deck, destination deck, and face-up cards
 class GameState:
     def __init__(self):
         self.routes = {}
         self.players: List[Player] = []
         self.current_player_idx: int = 0
+        self.current_player: Player = None
         self.score: Dict[str, int] = {}
         self.train_deck: List[Color] = []
         self.destination_deck: List[Destination] = []
         self.face_up_cards: List[Color] = []
         self.visualizer = TicketToRideVisualizer(self)
-        self.union_find = None
-        self.hash_map = None
-    
+        self.fw = None    
+
     def init(self):
         self.initialise_destination_deck()
         self.initialise_routes()
-        self.union_find = UnionFind(self.routes.keys())
         
+        self.fw = FloydWarshall(self.routes)
         # Add 12 of each color (excluding wild) and 14 wild cards
         self.setup_train_deck()
         # Draw initial face-up cards
-        self.face_up_cards = [self.game_state.train_deck.pop() for _ in range(5)]
+        self.face_up_cards = [self.train_deck.pop() for _ in range(5)]
+        self.current_player = self.players[self.current_player_idx]
 
-    def init_hash(self):
-        self.hash_map = HashMap()
+    def init_uf(self):
+        uf = UnionFind(self.routes.keys())
         for player in self.players:
-            for destination in player.destinations:
-                self.hash_map.add(destination.city1, destination.city2)
-                self.hash_map.add(destination.city2, destination.city1)
+            player.uf = uf  
 
     def initialise_destination_deck(self):
         # Add destination tickets to the deck
@@ -761,6 +748,10 @@ class GameState:
             }
         }
 
+    def update_player_turn(self):
+        self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
+        self.current_player = self.players[self.current_player_idx]
+
     def get_routes_from_city(self, city: str) -> Dict[str, List[Route]]:
         """Get all routes from a specific city."""
         return self.routes.get(city, {})
@@ -775,7 +766,7 @@ class GameState:
         if city1 in self.routes.get(city2, {}):
             routes.extend(self.routes[city2][city1])
         return routes
-
+    
     def get_unclaimed_routes(self) -> List[tuple[str, str, Route]]:
         """Get all unclaimed routes in the game."""
         unclaimed = []
@@ -846,7 +837,7 @@ class GameState:
         destination_results = []
         for destination in player.destinations:
             city1, city2 = destination.city1, destination.city2
-            if self.union_find.is_connected(city1, city2):
+            if player.uf.is_connected(city1, city2):
                 destination_results.append((destination, True))
             else:
                 destination_results.append((destination, False))
@@ -894,14 +885,27 @@ class GameState:
                 else:
                     self.players[self.current_player_idx].train_cards[color] -= route_length
                 self.players[self.current_player_idx].claimed_connections.append((city1, city2, color))
+                self.players[self.current_player_idx].claimed_cities.add(city1)
+                self.players[self.current_player_idx].claimed_cities.add(city2)
                 self.players[self.current_player_idx].points += self.calc_route_points(route_length)
-                self.union_find.union(city1, city2)
+                self.players[self.current_player_idx].uf.union(city1, city2)
                 if route_length >= 4:
                     #print("long route attempted at length", route_length)
                     pass
                 self.players[self.current_player_idx].remaining_trains -= route_length
             else:
                 pass
+        elif action_type == "draw_destination_tickets":
+            i, j, k, player_name = action[1:]
+            if i == 1:
+                destinations = [self.destination_deck.pop(0)]
+            if j == 1:
+                destinations = [self.destination_deck.pop(1)]
+            if k == 1:
+                destinations = [self.destination_deck.pop(2)]
+            if i == 0 and j == 0 and k == 0:
+                destinations = [self.destination_deck.pop(0)]
+            self.current_player.destinations.extend(destinations)
 
     def apply_action_final(self, action):
         self.apply_action(action)
@@ -912,6 +916,10 @@ class GameState:
         elif action_type == "claim_route":
             city1, city2, color, player_name = action[1:]
             print(f"{player_name} has claimed a route between {city1} and {city2} with {color}")
+        if action_type == "draw_destination_tickets":
+            i, j, k, player_name = action[1:]
+            ijk = sum([i,j,k])
+            print(f"{player_name} has drawn destination tickets and kept {ijk}")
             
     
     def is_end(self):
@@ -935,28 +943,42 @@ class GameState:
             if current_player.train_cards[Color.WILD] >= route.length:
                 legal_actions.append(("claim_route",city1, city2, Color.WILD, current_player.name))
         
+        # TODO - probably should bias towards not drawing from deck too much
         num_cards = sum(current_player.train_cards.values())
-        if num_cards <= 12:
         # Draw two train cards. Enumerate all possible combinations of face-up cards and deck cards
-            for i, card1 in enumerate(self.face_up_cards):
-                for j, card2 in enumerate(self.face_up_cards):
-                    if i != j:
-                        legal_actions.append(("draw_two_train_cards", i, card1, j, card2, current_player.name))
-                legal_actions.append(("draw_two_train_cards", i, card1, "deck", "deck", current_player.name))
-            legal_actions.append(("draw_two_train_cards", "deck", "deck", "deck", "deck", current_player.name))
-        else:
-            pass
-    
+        for i, card1 in enumerate(self.face_up_cards):
+            for j, card2 in enumerate(self.face_up_cards):
+                if i != j:
+                    legal_actions.append(("draw_two_train_cards", i, card1, j, card2, current_player.name))
+            legal_actions.append(("draw_two_train_cards", i, card1, "deck", "deck", current_player.name))
+        legal_actions.append(("draw_two_train_cards", "deck", "deck", "deck", "deck", current_player.name))
+        # TODO - Definitely should bias towards not drawing destinations if the player hasnt completed many yet
+        num_destinations = len(current_player.destinations)
+        if num_destinations < 8:
+            # Draw destination tickets: scry three, keep minimum one
+            for i in range(2):
+                for j in range(2):
+                    for k in range(2):
+                        legal_actions.append(("draw_destination_tickets", i, j, k, current_player.name))
+        
         return legal_actions
     
-    def get_missing_routes(self):
-        # Estimates how many more connections the player requires to complete each of their destination tickets
-        # TODO - Incomplete
-        missing_routes = []
+    def one_off(self,) -> bool:
+        #Check if the player only needs one more turn to finish a destination ticket.
         player = self.players[self.current_player_idx]
         for destination in player.destinations:
+            city1, city2 = destination.city1, destination.city2
+            if player.uf.is_connected(city1,city2):
+                continue #destination is already connected, skip
             
-            return False
+            one_off = self.fw.get_one_off_cities(city1)
+            if any(player.uf.is_connected(city2, city1off) for city1off in one_off):
+                return True
+            # other direction
+            one_off = self.fw.get_one_off_cities(city2)
+            if any(player.uf.is_connected(city1, city2off) for city2off in one_off):
+                return True
+        return False
 
     def game_result(self,game_num):
         #print(f"Game {game_num}:")
@@ -1003,7 +1025,7 @@ class TicketToRide:
         for player in self.game_state.players:
             self.deal_initial_cards(player)
         
-        self.game_state.init_hash()
+        self.game_state.init_uf()
     
     def deal_initial_cards(self, player: Player):
         # Deal 4 train cards to each player
@@ -1186,9 +1208,11 @@ class TicketToRide:
             else:
                 player.train_cards[color] -= route_length
             player.claimed_connections.append((city1, city2, color))
+            player.claimed_cities.add(city1)
+            player.claimed_cities.add(city2)
             player.points += self.game_state.calc_route_points(route_length)
             print(f"{player.name} has claimed the route between {city1} and {city2} with {color}")
-            self.game_state.union_find.union(city1, city2)
+            player.uf.union(city1, city2)
         else:
             print("Failed to claim route.")
             self.play_turn(player)
@@ -1295,7 +1319,8 @@ def main():
         print(f"\nTurn: {player.turn}")
         console.start_live()
         
-        game.game_state.current_player_idx = (game.game_state.current_player_idx + 1) % len(game.game_state.players)
+        game.game_state.update_player_turn()
+        
         
         # Check end game condition
         if current_player.remaining_trains <= 2:

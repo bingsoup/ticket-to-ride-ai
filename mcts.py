@@ -45,7 +45,7 @@ class MCTSNode:
             current_rollout_state.apply_action(action)
         return current_rollout_state.game_result(sim_num + 1)
 
-    def rollout_policy(self, possible_moves): # TODO Area of improvement - Heuristics
+    def rollout_policy(self, possible_moves): # TODO Area of improvement - Heuristics for which move to choose
         return random.choice(possible_moves)
 
     def backpropagate(self, result):
@@ -65,7 +65,7 @@ class MCTS:
             v.backpropagate(reward)
         return self.root.best_child().action
 
-    def tree_policy(self): # TODO Area of improvement - Pruning methods etc.
+    def tree_policy(self): # TODO Area of improvement - Heuristics for expansion, pruning methods etc.
         current_node = self.root
         while not current_node.state.is_end():
             if not current_node.is_fully_expanded():
