@@ -96,7 +96,7 @@ class Route:
     def is_claimed(self) -> bool:
         return self.claimed_by is not None
     
-console = LiveConsole()
+#console = LiveConsole()
 
 # Handles the game state, including the board, players, current player index, score, train deck, destination deck, and face-up cards
 class GameState:
@@ -924,8 +924,9 @@ class GameState:
     
     def is_end(self):
         # Check if the game state is terminal
-        if (self.players[self.current_player_idx].remaining_trains <= 2):
-            return True
+        for player in self.players:
+            if player.remaining_trains <= 2:
+                return True
         return False
     
     def get_legal_actions(self):
@@ -945,21 +946,23 @@ class GameState:
         
         # TODO - probably should bias towards not drawing from deck too much
         num_cards = sum(current_player.train_cards.values())
-        # Draw two train cards. Enumerate all possible combinations of face-up cards and deck cards
-        for i, card1 in enumerate(self.face_up_cards):
-            for j, card2 in enumerate(self.face_up_cards):
-                if i != j:
-                    legal_actions.append(("draw_two_train_cards", i, card1, j, card2, current_player.name))
-            legal_actions.append(("draw_two_train_cards", i, card1, "deck", "deck", current_player.name))
-        legal_actions.append(("draw_two_train_cards", "deck", "deck", "deck", "deck", current_player.name))
+        if len(self.train_deck) > 5:
+            # Draw two train cards. Enumerate all possible combinations of face-up cards and deck cards
+            for i, card1 in enumerate(self.face_up_cards):
+                for j, card2 in enumerate(self.face_up_cards):
+                    if i != j:
+                        legal_actions.append(("draw_two_train_cards", i, card1, j, card2, current_player.name))
+                legal_actions.append(("draw_two_train_cards", i, card1, "deck", "deck", current_player.name))
+            legal_actions.append(("draw_two_train_cards", "deck", "deck", "deck", "deck", current_player.name))
         # TODO - Definitely should bias towards not drawing destinations if the player hasnt completed many yet
         num_destinations = len(current_player.destinations)
         if num_destinations < 8:
-            # Draw destination tickets: scry three, keep minimum one
-            for i in range(2):
-                for j in range(2):
-                    for k in range(2):
-                        legal_actions.append(("draw_destination_tickets", i, j, k, current_player.name))
+            if len(self.destination_deck) >= 5:
+                # Draw destination tickets: scry three, keep minimum one
+                for i in range(2):
+                    for j in range(2):
+                        for k in range(2):
+                            legal_actions.append(("draw_destination_tickets", i, j, k, current_player.name))
         
         return legal_actions
     
@@ -979,9 +982,13 @@ class GameState:
             if any(player.uf.is_connected(city1, city2off) for city2off in one_off):
                 return True
         return False
+    
+    def switch_turn(self):
+        self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
+        self.current_player = self.players[self.current_player_idx]
 
     def game_result(self,game_num):
-        #print(f"Game {game_num}:")
+        #print(f"Game {game_num}: Score p1 ({self.players[0].points}) vs p2 ({self.players[1].points})")
         player = self.players[self.current_player_idx]
         destination_results = self.check_all_destinations(player)
 
@@ -992,11 +999,16 @@ class GameState:
             else:
                 player.points -= destination.points
                 #print(f"Destination between {destination.city1} and {destination.city2} has not been completed. Total score: {player.points}")
-        console.print_results(game_num,player)
+        #console.print_results(game_num,player)
+        
+        #return player.points - self.players[(self.current_player_idx + 1) % 2].points # TODO TRY THIS?
         return player.points
     
+    def print_score(self):
+        print(f"Score p1 ({self.players[0].points}) vs p2 ({self.players[1].points})")
+    
     def game_result_final(self,game_num):
-        console.stop()
+        #console.stop()
         print(f"Game {game_num}:")
         for player in self.players:
             print(f"Score {player.name}: {player.points}")
@@ -1274,9 +1286,16 @@ class TicketToRide:
         player.destinations.extend(to_keep)
         print(f"{player.name}'s current destinations: {', '.join(self.formatted_destinations(player))}")
 
+
+import gc
 def main():
+
+    timestart=time.time()
     game = TicketToRide()
     # Create players
+    city1 = "Los Angeles"
+    city2 = "New York"
+    d1 = Destination(city1, city2, 21)
     players = [
         Player(name="Player 1", train_cards={color: 0 for color in Color}, 
             destinations=[], claimed_connections=[], points=0, turn=1),
@@ -1289,24 +1308,24 @@ def main():
 
     print("You can type back to go to the previous menu option")
     print("Enjoy Ticket to Ride!")
-
+    
     # Main game loop
     game_end = False
     while not game_end:
         # Instantiate MCTS for Player 1
-        mcts_player = MCTS(game.game_state)
-        mcts_player2 = MCTS(game.game_state)
         current_player = game.game_state.players[game.game_state.current_player_idx]
         if current_player.name == "Player 1":
             # Use MCTS to determine the best action for Player 1
-            best_action = mcts_player.best_action(simulations_number=400)
+            mcts_player = MCTS(game.game_state)
+            best_action = mcts_player.best_action_multi(simulations_number=500)
             game.game_state.apply_action_final(best_action)
-            console.stop()
+            #console.stop()
         
         elif current_player.name == "Player 2":
-            best_action = mcts_player2.best_action(simulations_number=400)
+            mcts_player2 = MCTS(game.game_state)
+            best_action = mcts_player2.best_action_multi(simulations_number=500)
             game.game_state.apply_action_final(best_action)
-            console.stop()
+            #console.stop()
         
         """
         else:
@@ -1317,7 +1336,7 @@ def main():
         for player in game.game_state.players:
             player.turn += 1
         print(f"\nTurn: {player.turn}")
-        console.start_live()
+        #console.start_live()
         
         game.game_state.update_player_turn()
         
@@ -1328,9 +1347,17 @@ def main():
     
     # Calculate final scores
     game.game_state.game_result_final(1)
-    game.game_state.visualizer = TicketToRideVisualizer(game.game_state)
-    game.game_state.visualizer.visualize_game_map()
 
-    print("End of game")
+    #game.game_state.visualizer = TicketToRideVisualizer(game.game_state)
+    #game.game_state.visualizer.visualize_game_map() #visualize the final state of the game board
+
+    timeend=time.time()
+    elapsed_time = timeend - timestart
+    minutes = int(elapsed_time // 60)
+    seconds = int(elapsed_time % 60)
+
+    print(f"Time taken: {minutes} minutes and {seconds} seconds")
+
 if __name__ == "__main__":
     main()
+    
