@@ -9,6 +9,7 @@ from mcts import MCTS
 from console import LiveConsole
 from graph import TicketToRideVisualizer
 from fw import FloydWarshall
+from randomAgent import RandomAgent
 
 class Color(Enum):
     RED = "red"
@@ -124,43 +125,42 @@ class GameState:
         self.current_player = self.players[self.current_player_idx]
 
     def init_uf(self):
-        uf = UnionFind(self.routes.keys())
         for player in self.players:
-            player.uf = uf  
+            player.uf = UnionFind(self.routes.keys())
 
     def initialise_destination_deck(self):
         # Add destination tickets to the deck
         destinations = [
-            Destination("Los Angeles", "New York", 21),
-            Destination("Duluth", "Houston", 8),
-            Destination("Sault St. Marie", "Nashville", 8),
+            Destination("Denver", "El Paso", 4),
+            Destination("Kansas City", "Houston", 5),
             Destination("New York", "Atlanta", 6),
-            Destination("Portland", "Nashville", 17),
-            Destination("Vancouver", "Montreal", 20),
+            Destination("Calgary", "Salt Lake City", 7),
+            Destination("Chicago", "New Orleans", 7),
+            Destination("Duluth", "Houston", 8),
+            Destination("Helena", "Los Angeles", 8),
+            Destination("Sault St. Marie", "Nashville", 8),
+            Destination("Sault St. Marie", "Oklahoma City", 9),
+            Destination("Chicago", "Santa Fe", 9),
+            Destination("Montreal", "Atlanta", 9),
+            Destination("Seattle", "Los Angeles", 9),
             Destination("Duluth", "El Paso", 10),
             Destination("Toronto", "Miami", 10),
-            Destination("Portland", "Phoenix", 11),
             Destination("Dallas", "New York", 11),
-            Destination("Calgary", "Salt Lake City", 7),
-            Destination("Calgary", "Phoenix", 13),
-            Destination("Los Angeles", "Miami", 20),
-            Destination("Winnipeg", "Little Rock", 11),
-            Destination("San Francisco", "Atlanta", 17),
-            Destination("Kansas City", "Houston", 5),
-            Destination("Los Angeles", "Chicago", 16),
             Destination("Denver", "Pittsburgh", 11),
-            Destination("Chicago", "Santa Fe", 9),
-            Destination("Vancouver", "Santa Fe", 13),
+            Destination("Portland", "Phoenix", 11),
+            Destination("Winnipeg", "Little Rock", 11),
             Destination("Boston", "Miami", 12),
-            Destination("Chicago", "New Orleans", 7),
-            Destination("Montreal", "Atlanta", 9),
-            Destination("Seattle", "New York", 22),
-            Destination("Denver", "El Paso", 4),
-            Destination("Helena", "Los Angeles", 8),
             Destination("Winnipeg", "Houston", 12),
+            Destination("Calgary", "Phoenix", 13),
             Destination("Montreal", "New Orleans", 13),
-            Destination("Sault St. Marie", "Oklahoma City", 9),
-            Destination("Seattle", "Los Angeles", 9),
+            Destination("Vancouver", "Santa Fe", 13),
+            Destination("Los Angeles", "Chicago", 16),
+            Destination("Portland", "Nashville", 17),
+            Destination("San Francisco", "Atlanta", 17),
+            Destination("Los Angeles", "Miami", 20),
+            Destination("Vancouver", "Montreal", 20),
+            Destination("Los Angeles", "New York", 21),
+            Destination("Seattle", "New York", 22)
         ]
         self.destination_deck = destinations
         random.shuffle(self.destination_deck)
@@ -378,6 +378,7 @@ class GameState:
                     Route(length=4, color=Color.ORANGE)
                 ],
                 "Omaha": [
+                    Route(length=1, color=Color.GRAY),
                     Route(length=1, color=Color.GRAY)
                 ]
             },
@@ -856,7 +857,13 @@ class GameState:
             return 10
         elif route_length == 6:
             return 15
-    
+        
+    def print_owned_routes(self):
+        for player in self.players:
+            print(f"{player.name} has claimed the following routes:")
+            for city1, city2, color in player.claimed_connections:
+                print(f"{city1} to {city2} with {color} and length {self.get_route_length(city1, city2, color)}")
+
     # MCTS methods
     def copy(self):
         # Create a deep copy of the game state
@@ -889,7 +896,7 @@ class GameState:
                 self.players[self.current_player_idx].claimed_cities.add(city2)
                 self.players[self.current_player_idx].points += self.calc_route_points(route_length)
                 self.players[self.current_player_idx].uf.union(city1, city2)
-                if route_length >= 4:
+                if route_length >= 5:
                     #print("long route attempted at length", route_length)
                     pass
                 self.players[self.current_player_idx].remaining_trains -= route_length
@@ -897,14 +904,15 @@ class GameState:
                 pass
         elif action_type == "draw_destination_tickets":
             i, j, k, player_name = action[1:]
+            destinations = []
             if i == 1:
-                destinations = [self.destination_deck.pop(0)]
+                destinations.append(self.destination_deck.pop(0))
             if j == 1:
-                destinations = [self.destination_deck.pop(1)]
+                destinations.append(self.destination_deck.pop(1))
             if k == 1:
-                destinations = [self.destination_deck.pop(2)]
+                destinations.append(self.destination_deck.pop(2))
             if i == 0 and j == 0 and k == 0:
-                destinations = [self.destination_deck.pop(0)]
+                destinations.append(self.destination_deck.pop(random.randint(0, 2)))
             self.current_player.destinations.extend(destinations)
 
     def apply_action_final(self, action):
@@ -930,7 +938,6 @@ class GameState:
         return False
     
     def get_legal_actions(self):
-        # TODO Need to support adding destination tickets
         legal_actions = []
         current_player = self.players[self.current_player_idx]
         unclaimed_routes = self.get_unclaimed_routes()
@@ -1005,7 +1012,14 @@ class GameState:
         return player.points
     
     def print_score(self):
-        print(f"Score p1 ({self.players[0].points}) vs p2 ({self.players[1].points})")
+        for player in self.players:
+            destination_results = self.check_all_destinations(player)
+            for destination, is_complete in destination_results:
+                if is_complete:
+                    player.points += destination.points
+                else:
+                    player.points -= destination.points
+            print(f"Perceived Score {player.name}: {player.points}")
     
     def game_result_final(self,game_num):
         #console.stop()
@@ -1286,22 +1300,18 @@ class TicketToRide:
         player.destinations.extend(to_keep)
         print(f"{player.name}'s current destinations: {', '.join(self.formatted_destinations(player))}")
 
-
-import gc
 def main():
 
     timestart=time.time()
     game = TicketToRide()
     # Create players
-    city1 = "Los Angeles"
-    city2 = "New York"
-    d1 = Destination(city1, city2, 21)
     players = [
         Player(name="Player 1", train_cards={color: 0 for color in Color}, 
             destinations=[], claimed_connections=[], points=0, turn=1),
         Player(name="Player 2", train_cards={color: 0 for color in Color}, 
             destinations=[], claimed_connections=[], points=0, turn=1)
     ]
+
     print("\n" + "_" * 200 + "\n")
     # Set up and start the game
     game.setup_game(players)
@@ -1312,30 +1322,38 @@ def main():
     # Main game loop
     game_end = False
     while not game_end:
-        # Instantiate MCTS for Player 1
         current_player = game.game_state.players[game.game_state.current_player_idx]
+        
         if current_player.name == "Player 1":
+            print(f"\nTurn: {current_player.turn}")
             # Use MCTS to determine the best action for Player 1
             mcts_player = MCTS(game.game_state)
-            best_action = mcts_player.best_action_multi(simulations_number=500)
+            best_action = mcts_player.best_action_multi (simulations_number=10000)
             game.game_state.apply_action_final(best_action)
+            current_player.turn += 1
             #console.stop()
-        
+        # Player 2 Random Moves
+        elif current_player.name == "Player 2":
+            random = RandomAgent(game.game_state)
+            move = random.get_action()
+            game.game_state.apply_action_final(move)
+            current_player.turn += 1
+            #console.stop()
+
+        """ Player 2 MCTS
         elif current_player.name == "Player 2":
             mcts_player2 = MCTS(game.game_state)
-            best_action = mcts_player2.best_action_multi(simulations_number=500)
+            best_action = mcts_player2.best_action_multi(simulations_number=2000)
             game.game_state.apply_action_final(best_action)
             #console.stop()
-        
         """
+        """ Player 2 Manual
         else:
             # Let Player 2 play their turn manually
             game.play_turn(current_player)
         """
+            
         
-        for player in game.game_state.players:
-            player.turn += 1
-        print(f"\nTurn: {player.turn}")
         #console.start_live()
         
         game.game_state.update_player_turn()
@@ -1357,6 +1375,8 @@ def main():
     seconds = int(elapsed_time % 60)
 
     print(f"Time taken: {minutes} minutes and {seconds} seconds")
+
+    game.game_state.print_owned_routes()
 
 if __name__ == "__main__":
     main()

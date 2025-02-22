@@ -40,13 +40,14 @@ class MCTSNode:
         if opponent_actions:
             opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
             self.next_state.apply_action(opponent_action)
+            
         # Back to MCTS agent's turn
         self.next_state.switch_turn()        
         child_node = MCTSNode(self.next_state, parent=self, action=action)
         self.children.append(child_node)
         return child_node
 
-    def best_child(self, c_param=4):
+    def best_child(self, c_param=1.5):
         if not self.children:
             return None
 
@@ -55,7 +56,7 @@ class MCTSNode:
             if child.visits == 0:
                 choices_weights.append(float('inf'))
             else:
-                one_off_bonus = 2 if child.state.one_off() else 0
+                one_off_bonus = 2 if child.state.one_off() else 0 # TODO test without this ofc
                 weight = (child.value / child.visits) + \
                          c_param * math.sqrt((2 * math.log(self.visits) / child.visits)) + \
                          one_off_bonus
@@ -67,14 +68,17 @@ class MCTSNode:
         current_rollout_state = self.state.copy()
         while not current_rollout_state.is_end():
             possible_moves = current_rollout_state.get_legal_actions()
+            if not possible_moves:
+                break
             action = self.rollout_policy(possible_moves)
             current_rollout_state.apply_action(action)
             # Opponent plays immediately after
             current_rollout_state.switch_turn()
             opponent_actions = current_rollout_state.get_legal_actions()
-            if opponent_actions:
-                opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
-                current_rollout_state.apply_action(opponent_action)
+            if not opponent_actions:
+                break
+            opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
+            current_rollout_state.apply_action(opponent_action)
             # Back to MCTS agent's turn
             current_rollout_state.switch_turn()      
         return current_rollout_state.game_result(sim_num + 1)
@@ -97,10 +101,7 @@ class MCTS:
             v = self.tree_policy()
             reward = v.rollout(sim_num)
             v.backpropagate(reward)
-        self.root.best_child().state.print_scores()
         return self.root.best_child().action
-    
-
     
     def best_action_multi(self, simulations_number, num_processes=8):
         if not self.root.state.get_legal_actions():
@@ -113,9 +114,10 @@ class MCTS:
 
         if not results:
             return None
-        best = max(set(results), key=results.count)
-        best.root.best_child().state.print_scores()
-        return max(set(results), key=results.count)  # Most common best action
+        
+        best = max(set(results), key=results.count) # Highest scoring best action (should try which one maximises score)
+        best.state.print_score()
+        return best.action
 
     def tree_policy(self):
         current_node = self.root
@@ -147,4 +149,7 @@ def run_simulation(game_state, simulations_number):
         if v:
             reward = v.rollout(simulations_number)
             v.backpropagate(reward)
-    return local_mcts.root.best_child().action if local_mcts.root.best_child() else None
+    if local_mcts.root.best_child():
+        return local_mcts.root.best_child()
+    else:
+        return None
