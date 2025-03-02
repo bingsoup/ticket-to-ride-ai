@@ -97,8 +97,6 @@ class Route:
     def is_claimed(self) -> bool:
         return self.claimed_by is not None
     
-#console = LiveConsole()
-
 # Handles the game state, including the board, players, current player index, score, train deck, destination deck, and face-up cards
 class GameState:
     def __init__(self):
@@ -112,6 +110,7 @@ class GameState:
         self.face_up_cards: List[Color] = []
         self.visualizer = TicketToRideVisualizer(self)
         self.fw = None    
+        self.update = None
 
     def init(self):
         self.initialise_destination_deck()
@@ -783,9 +782,8 @@ class GameState:
             claimed = route.is_claimed()
             if (color == Color.WILD or route.color == color or route.color == Color.GRAY) and not (claimed):
                 route.claim(player)
-
                 return True
-            return False
+        return False
 
     def claim_route(self, city1: str, city2: str, color: Color, player: str) -> bool:
         """Attempt to claim a route between two cities."""
@@ -814,7 +812,6 @@ class GameState:
         for color in Color:
             if color != Color.WILD and color != Color.GRAY:
                 self.train_deck.extend([color] * 12)
-            
         self.train_deck.extend([Color.WILD] * 14)
         random.shuffle(self.train_deck)
 
@@ -866,10 +863,21 @@ class GameState:
 
     # MCTS methods
     def copy(self):
-        # Create a deep copy of the game state
-        new_state = GameState()
+        # Store the update reference
+        update_ref = self.update
+        
+        # Set it to None temporarily for copying
+        self.update = None
+        
+        # Create copy
         new_state = copy.deepcopy(self)
+        
+        # Restore the update reference in both objects
+        self.update = update_ref
+        new_state.update = update_ref
+        
         return new_state
+    
     
     def apply_action(self, action):
         action_type = action[0]
@@ -994,7 +1002,7 @@ class GameState:
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
         self.current_player = self.players[self.current_player_idx]
 
-    def game_result(self,game_num):
+    def game_result(self, game_num):
         #print(f"Game {game_num}: Score p1 ({self.players[0].points}) vs p2 ({self.players[1].points})")
         player = self.players[self.current_player_idx]
         destination_results = self.check_all_destinations(player)
@@ -1007,7 +1015,8 @@ class GameState:
                 player.points -= destination.points
                 #print(f"Destination between {destination.city1} and {destination.city2} has not been completed. Total score: {player.points}")
         #console.print_results(game_num,player)
-        
+        if self.update:
+            self.update.publish("mcts_update", game_num, player)
         #return player.points - self.players[(self.current_player_idx + 1) % 2].points # TODO TRY THIS?
         return player.points
     
@@ -1038,7 +1047,6 @@ class GameState:
         
 
 # General game class which stores players, current player index, train deck, destination deck, face-up cards
-# TODO - Implement final scoring
 class TicketToRide:
     def __init__(self):
         self.game_state = GameState()
@@ -1090,7 +1098,6 @@ class TicketToRide:
         
         for city1, city2, route in unclaimed_routes:
             # Check if player has enough cards to claim the route
-            # TODO allow combinations of wild and other colors
             if route.color == Color.GRAY:
                 for color in Color:
                     if player.train_cards[color] >= route.length:
@@ -1301,7 +1308,6 @@ class TicketToRide:
         print(f"{player.name}'s current destinations: {', '.join(self.formatted_destinations(player))}")
 
 def main():
-
     timestart=time.time()
     game = TicketToRide()
     # Create players
@@ -1318,7 +1324,11 @@ def main():
 
     print("You can type back to go to the previous menu option")
     print("Enjoy Ticket to Ride!")
-    
+
+    console = LiveConsole()
+    num_sims = 2000
+    console.total_expected_games = num_sims
+
     # Main game loop
     game_end = False
     while not game_end:
@@ -1326,12 +1336,13 @@ def main():
         
         if current_player.name == "Player 1":
             print(f"\nTurn: {current_player.turn}")
+            console.start_live()
             # Use MCTS to determine the best action for Player 1
             mcts_player = MCTS(game.game_state)
-            best_action = mcts_player.best_action_multi (simulations_number=10000)
+            best_action = mcts_player.best_action_multi (console.update_display, num_sims)
             game.game_state.apply_action_final(best_action)
             current_player.turn += 1
-            #console.stop()
+            console.stop()
         # Player 2 Random Moves
         elif current_player.name == "Player 2":
             random = RandomAgent(game.game_state)
@@ -1352,12 +1363,8 @@ def main():
             # Let Player 2 play their turn manually
             game.play_turn(current_player)
         """
-            
-        
-        #console.start_live()
         
         game.game_state.update_player_turn()
-        
         
         # Check end game condition
         if current_player.remaining_trains <= 2:
