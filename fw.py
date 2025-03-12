@@ -18,9 +18,10 @@ class FloydWarshall:
         # Initialize direct routes (each route has a fixed length of 1, as it's a single route between two cities)
         for city1 in routes:
             for city2 in routes[city1]:
-                i, j = self.city_idx[city1], self.city_idx[city2]
-                self.dist[i][j] = 1  # All direct connections are treated as length 1
-                self.dist[j][i] = 1  # Undirected graph
+                for route in routes[city1][city2]:
+                    i, j = self.city_idx[city1], self.city_idx[city2]
+                    self.dist[i][j] = route.length  # All direct connections are treated as length 1
+                    self.dist[j][i] = route.length  # Undirected graph
         
         # Self distances are 0
         for i in range(self.n):
@@ -41,3 +42,9 @@ class FloydWarshall:
         if idx is None:
             return set()
         return {self.cities[j] for j in range(self.n) if self.dist[idx][j] == 2}
+    
+    def get_distance(self, city1, city2):
+        i, j = self.city_idx.get(city1), self.city_idx.get(city2)
+        if i is None or j is None:
+            return float('inf')
+        return self.dist[i][j]

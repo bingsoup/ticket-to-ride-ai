@@ -4,7 +4,7 @@ import random
 import time
 from multiprocessing import Pipe
 import threading
-from graph import visualize_mcts_tree as viz_mcts
+#from graph import visualize_mcts_tree as viz_mcts
 
 class MCTSNode:
     def __init__(self, state, parent=None, action=None):
@@ -19,7 +19,7 @@ class MCTSNode:
     def is_fully_expanded(self):
         possible_actions = self.state.get_legal_actions()
 
-        const = 1.5 # TODO modify exploration constant
+        const = 2.3 # TODO modify exploration constant
         max_children = int(math.ceil(const * math.sqrt(self.visits)))
         return len(self.children) >= min(len(possible_actions), max_children)
         """ full expansion
@@ -68,7 +68,7 @@ class MCTSNode:
         self.children.append(child_node)
         return child_node
 
-    def best_child(self, c_param=2.5):
+    def best_child(self, c_param=2.2):
         if not self.children:
             return None
         choices_weights = []
@@ -76,22 +76,58 @@ class MCTSNode:
             if child.visits == 0:
                 choices_weights.append(float('inf'))
             else:
-                #one_off_bonus = 2 if child.state.one_off() else 0 # TODO test without this ofc
-                weight = (child.value / child.visits) + \
-                         c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
-                choices_weights.append(weight)
+                # Base UCT score - TODO play around with it
+                uct_score = (child.value / child.visits) + \
+                        c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
+                
+                choices_weights.append(uct_score)
         return self.children[choices_weights.index(max(choices_weights))]
-
+    
     def rollout(self, sim_num):
         current_rollout_state = self.state.copy()
         depth = 0
-        max_depth = 100
+        destination_modifier = 0
+        distance_modifier = 0
+        wasted_trains = 0
+        max_depth = 20  # modify
+        
         while not current_rollout_state.is_end() and depth < max_depth:
+            num_draw = 0
+            rem_dest = current_rollout_state.check_all_destinations(current_rollout_state.current_player)
+            num_dest = sum(1 for dest in rem_dest if dest[1] == False)
+            incr = 0
             possible_moves = current_rollout_state.get_legal_actions()
             if not possible_moves:
                 break
-            action = self.rollout_policy(possible_moves)
+            action = self.rollout_policy(possible_moves, current_rollout_state)
+            if action[0] == 'draw_destination_tickets':
+                # Quadratic penalty for drawing destination tickets
+                # num_dest is the number of uncompleted tickets
+                # I can also penalise based on how much taking this ticket will reduce
+                # the closeness of the destination tickets
+                num_draw = sum(action[1:3])
+                destination_modifier = max((((pow(num_dest,2)) + (15 * num_draw)) // 8),destination_modifier) if num_dest > 0 else 0
+            if action[0] == 'claim_route':
+                # Store the closeness of the destination tickets such that I can re-check after the route is claimed
+                rem_trains = current_rollout_state.current_player.remaining_trains
+                destinations = current_rollout_state.get_distance(current_rollout_state.current_player)
+
             current_rollout_state.apply_action(action)
+            if action[0] == 'claim_route':
+                # If the closeness of the destination tickets has reduced, reward
+                rem_trains_after = current_rollout_state.current_player.remaining_trains
+                
+                destinations_after = current_rollout_state.get_distance(current_rollout_state.current_player)
+                for i in range(len(destinations_after)):
+                    if destinations_after[i][1] < destinations[i][1]:
+                        incr = destinations[i][1] - destinations_after[i][1]
+                        value = destinations[i][0].points
+                        distance_modifier += (incr * ((value + 0.5) - destinations_after[i][1]))  
+                        #distance_modifier += incr * 3 # (OLD)
+                if incr == 0:
+                    wasted_trains += rem_trains - rem_trains_after
+                    pass
+                
             # Opponent plays immediately after
             current_rollout_state.switch_turn()
             opponent_actions = current_rollout_state.get_legal_actions()
@@ -102,21 +138,50 @@ class MCTSNode:
             # Back to MCTS agent's turn
             current_rollout_state.switch_turn()    
             depth += 1  
-        return current_rollout_state
+        # TODO return the depth and work backwords to give rewards for the specific move
+        distance_modifier -= wasted_trains * 1.8
+        return current_rollout_state, destination_modifier, distance_modifier
 
-    def rollout_policy(self, possible_moves):
-        # Split actions into their respective types to make random selection fair
-        random_type = random.choice(['draw_two_train_cards', 'claim_route', 'draw_destination_tickets'])
-        action_type = [action for action in possible_moves if action[0] == random_type]
-        if not action_type:
-            return random.choice(possible_moves)
+    def rollout_policy(self, possible_moves, current_rollout_state):
+        # Bias choices
+        action_found = False
+        while not action_found:
+            random_choice = random.random()
+            if random_choice < 0.02:
+                random_type = 'draw_destination_tickets'
+            elif random_choice < 0.5:
+                random_type = 'claim_route'
+            else:
+                random_type = 'draw_two_train_cards'
+            action_type = [action for action in possible_moves if action[0] == random_type]
+            if action_type:
+                action_found = True
+        if random_type == 'draw_destination_tickets':
+            # Prefer lower number of destination tickets. Sort by number of destiantions its gonna take. 
+            # 80 percent of the time, split the list in half (Then 66 percent to get 1, 33 to get two)
+            action_type = sorted(action_type, key=lambda x: sum(x[1:3]))
+            if random.random() < 0.8:
+                action_type = action_type[:len(action_type)//2]
+        if random_type == 'claim_route':
+            # 50% of the time, attempt to claim a helpful route
+            if random.random() < 0.6: # TODO change the constant
+                best_route = current_rollout_state.select_best_route_action(action_type)
+                if best_route:
+                    return best_route
+            
         return random.choice(action_type)
 
-    def backpropagate(self, result):
+    def backpropagate(self, result,dest_mod,dist_mod):
         self.visits += 1
         self.value += result
+        if self.action_type == 'draw_destination_tickets':
+            self.value -= dest_mod
+            pass
+        if self.action_type == 'claim_route':
+            self.value += dist_mod
+            pass
         if self.parent:
-            self.parent.backpropagate(result)
+            self.parent.backpropagate(result,dest_mod*0.9,dist_mod*0.9)
 
 class MCTS:
     def __init__(self, game_state, update_queue=None):
@@ -126,12 +191,17 @@ class MCTS:
     def best_action(self, simulations_number):
         for sim_num in range(simulations_number):
             v = self.tree_policy()
-            state = v.rollout(sim_num)
+            state, dest_mod, dist_mod = v.rollout(sim_num)
             player = state.players[state.current_player_idx]
             reward = state.game_result(sim_num)
-            v.backpropagate(reward)
+            v.backpropagate(reward,dest_mod,dist_mod)
+         # Visualize the tree
+        """
         viz_mcts(self.root, max_depth=4, 
                        filename=f"mcts_tree_turn_{self.root.state.current_player.turn}.png")
+        """
+        #self.root.state.apply_action(self.root.best_child().action)
+        self.root.state.print_score()
         return self.root.best_child().action
     
     def best_action_multi(self, update_callback, simulations_number, num_processes=8):
@@ -202,9 +272,10 @@ class MCTS:
         # Find a MCTS instance that chose this action
         for action, mcts in valid_actions:
             if action == best_action:
-                # Visualize the tree from this instance
-                viz_mcts(mcts.root, max_depth=3, 
-                        filename=f"mcts_tree_turn_{mcts.root.state.current_player.turn}.png")
+                """ # Visualize the tree
+                viz_mcts(self.root, max_depth=4, 
+                            filename=f"mcts_tree_turn_{self.root.state.current_player.turn}.png")
+                """
                 mcts.root.state.print_score()
                 return best_action
         
@@ -273,10 +344,10 @@ def run_simulation(game_state, simulations_number, pipe_connection, worker_id):
         for i in range(simulations_number):
             v = local_mcts.tree_policy()
             if v:
-                state = v.rollout(i)
+                state, dest_mod, dist_mod = v.rollout(i)
                 player = state.players[state.current_player_idx]
                 reward = state.game_result(i)
-                v.backpropagate(reward)
+                v.backpropagate(reward,dest_mod,dist_mod)
                 
                 # update pipe every 10 simulations
                 local_sim_count += 1

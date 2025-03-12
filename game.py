@@ -895,9 +895,6 @@ class GameState:
         """Get the length of a specific route."""
         routes = self.route_lookup(city1, city2)
         return routes[0].length
-        for route in routes:
-            return route.length
-        return None
     
     def setup_train_deck(self):
         for color in Color:
@@ -1041,7 +1038,7 @@ class GameState:
         new_state.update = None
         
         return new_state
-    
+        
     def apply_action(self, action):
         action_type = action[0]
         if action_type == "draw_two_train_cards":
@@ -1067,9 +1064,6 @@ class GameState:
                 self.players[self.current_player_idx].claimed_cities.add(city2)
                 self.players[self.current_player_idx].points += self.calc_route_points(route_length)
                 self.players[self.current_player_idx].uf.union(city1, city2)
-                if route_length >= 5:
-                    #print("long route attempted at length", route_length)
-                    pass
                 self.players[self.current_player_idx].remaining_trains -= route_length
             else:
                 pass
@@ -1101,6 +1095,16 @@ class GameState:
             i, j, k, player_name = action[1:]
             ijk = sum([i,j,k])
             print(f"{player_name} has drawn destination tickets and kept {ijk}")
+        print(f"Remaining trains {self.current_player.name}: {self.current_player.remaining_trains}")
+        dest_completion = self.get_distance(self.current_player)
+        for destination in dest_completion:
+            distance = destination[1]
+            dest = destination[0]
+            if distance == 0:
+                print(f"{self.current_player.name} has completed destination ticket {dest}")
+            else:
+                print(f"{self.current_player.name} is {distance} trains away from completing destination ticket {dest}")
+        print(f"")
             
     
     def is_end(self):
@@ -1142,7 +1146,8 @@ class GameState:
                 for i in range(2):
                     for j in range(2):
                         for k in range(2):
-                            legal_actions.append(("draw_destination_tickets", i, j, k, current_player.name))
+                            if i + j + k >= 1:
+                                legal_actions.append(("draw_destination_tickets", i, j, k, current_player.name))
         
         return legal_actions
     
@@ -1200,12 +1205,181 @@ class GameState:
         
         return max_length
     
+    def get_distance(self, player):
+        """
+        Calculate how close a player is to completing each destination ticket.
+        
+        Returns a list of tuples (destination, closeness) where closeness is the
+        number of train pieces needed to connect the destination cities.
+        A closeness of 0 means the destination is already completed.
+        """
+        results = []
+        
+        # For each destination ticket
+        for destination in player.destinations:
+            city1, city2 = destination.city1, destination.city2
+            
+            # If already completed
+            if player.uf.is_connected(city1, city2):
+                results.append((destination, 0))
+                continue
+            
+            # First, try direct paths using Floyd-Warshall
+            direct_distance = self.fw.get_distance(city1, city2)
+            
+            # Find all cities connected to city1 and city2 in the player's network
+            connected_to_city1 = set()
+            connected_to_city2 = set()
+            
+            # Only consider cities that the player has claimed
+            for city in player.claimed_cities:
+                if player.uf.is_connected(city1, city):
+                    connected_to_city1.add(city)
+                if player.uf.is_connected(city2, city):
+                    connected_to_city2.add(city)
+            
+            # Initialize with direct distance as fallback
+            min_distance = direct_distance
+            
+            # If both endpoints have connections, find shortest path between clusters
+            if connected_to_city1 and connected_to_city2:
+                for c1 in connected_to_city1:
+                    for c2 in connected_to_city2:
+                        if c1 == c2:  # Cities are already connected through player's network
+                            min_distance = 0
+                            break
+                        # Get distance from C1 to C2 (should be unclaimed routes only)
+                        path_dist = self.fw.get_distance(c1, c2)
+                        if path_dist < min_distance:
+                            min_distance = path_dist
+                    if min_distance == 0:
+                        break
+            
+            # If only city1 is connected to player's network
+            elif connected_to_city1:
+                for c1 in connected_to_city1:
+                    path_dist = self.fw.get_distance(c1, city2)
+                    if path_dist < min_distance:
+                        min_distance = path_dist
+            
+            # If only city2 is connected to player's network
+            elif connected_to_city2:
+                for c2 in connected_to_city2:
+                    path_dist = self.fw.get_distance(city1, c2)
+                    if path_dist < min_distance:
+                        min_distance = path_dist
+            
+            # Neither endpoint is connected - just use direct distance
+            # This is already initialized as min_distance = direct_distance
+            
+            # Sanity check: distance should never be negative or exceed board size
+            if min_distance < 0:
+                min_distance = direct_distance
+            if min_distance > 20:  # Max reasonable distance on TTR board
+                min_distance = direct_distance
+                
+            results.append((destination, min_distance))
+        
+        return results
+    
+    def select_best_route_action(self, route_actions):
+        """
+        Efficiently selects a route action that helps complete destination tickets.
+        
+        Args:
+            route_actions: List of claim_route actions
+            
+        Returns:
+            A claim_route action that helps complete a destination ticket,
+            or a random action if none are particularly beneficial
+        """
+        if not route_actions:
+            return None
+            
+        player = self.current_player
+        beneficial_actions = []
+        
+        # Group destination tickets by cities for faster lookup
+        city_to_dest = {}
+        for i, dest in enumerate(player.destinations):
+            if dest.city1 not in city_to_dest:
+                city_to_dest[dest.city1] = []
+            if dest.city2 not in city_to_dest:
+                city_to_dest[dest.city2] = []
+            # Store index instead of Destination object
+            city_to_dest[dest.city1].append(i)
+            city_to_dest[dest.city2].append(i)
+        
+        # Check if claiming a route directly completes a destination
+        for action in route_actions:
+            city1, city2 = action[1], action[2]
+            score = 0
+            
+            # Check if this route directly connects the endpoints of a destination
+            for dest in player.destinations:
+                if (city1 == dest.city1 and city2 == dest.city2) or (city1 == dest.city2 and city2 == dest.city1):
+                    if not player.uf.is_connected(dest.city1, dest.city2):
+                        # Direct completion - highest priority
+                        beneficial_actions.append((action, 1000 + dest.points))
+                        continue
+            
+            # Check if route connects clusters that contain destination endpoints
+            connects_clusters = False
+            for dest in player.destinations:
+                # Skip completed destinations
+                if player.uf.is_connected(dest.city1, dest.city2):
+                    continue
+                    
+                c1_connected = player.uf.is_connected(dest.city1, city1) or player.uf.is_connected(dest.city1, city2)
+                c2_connected = player.uf.is_connected(dest.city2, city1) or player.uf.is_connected(dest.city2, city2)
+                
+                if c1_connected and c2_connected:
+                    # This route will connect two clusters containing our destination endpoints
+                    beneficial_actions.append((action, 500 + dest.points))
+                    connects_clusters = True
+                    break
+            
+            if connects_clusters:
+                continue
+                
+            # Check if route extends a cluster towards a destination endpoint
+            # This is less valuable but still good
+            relevant_dest_indices = []
+            if city1 in city_to_dest:
+                relevant_dest_indices.extend(city_to_dest[city1])
+            if city2 in city_to_dest:
+                relevant_dest_indices.extend(city_to_dest[city2])
+            
+            # Use a set for the indices to remove duplicates
+            for idx in set(relevant_dest_indices):
+                dest = player.destinations[idx]
+                # Skip completed destinations
+                if player.uf.is_connected(dest.city1, dest.city2):
+                    continue
+                    
+                # Award points based on destination value
+                score += dest.points // 2
+            
+            if score > 0:
+                beneficial_actions.append((action, score))
+        
+        # If we found beneficial actions, choose from the top ones
+        if beneficial_actions:
+            # Sort by score (higher is better)
+            beneficial_actions.sort(key=lambda x: x[1], reverse=True)
+            
+            # Choose from the top 3 or fewer if there aren't that many
+            top_count = min(3, len(beneficial_actions))
+            return beneficial_actions[random.randint(0, top_count-1)][0]
+        
+        # If no beneficial actions found, return a random action
+        return None
+    
     def switch_turn(self):
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
         self.current_player = self.players[self.current_player_idx]
 
     def game_result(self, game_num):
-        self.print_score()
         player = self.players[self.current_player_idx]
         opponent = self.players[(self.current_player_idx + 1) % len(self.players)]
         
@@ -1239,13 +1413,14 @@ class GameState:
     
     def print_score(self):
         for player in self.players:
+            temp_points = player.points
             destination_results = self.check_all_destinations(player)
             for destination, is_complete in destination_results:
                 if is_complete:
-                    player.points += destination.points
+                    temp_points += destination.points
                 else:
-                    player.points -= destination.points
-            print(f"Perceived Score {player.name}: {player.points}")
+                    temp_points -= destination.points
+            print(f"Perceived Score {player.name}: {temp_points}")
     
     def game_result_final(self, game_num):
         print(f"Game {game_num}:")
@@ -1254,7 +1429,7 @@ class GameState:
         longest_routes = [(player, self.get_longest_route_length(player)) for player in self.players]
         longest_routes.sort(key=lambda x: x[1], reverse=True)
         
-        # Award bonus to player(s) with longest route
+        # Award bonus to player with longest route
         if len(longest_routes) > 1 and longest_routes[0][1] > longest_routes[1][1]:
             longest_player = longest_routes[0][0]
             longest_player.points += 10
@@ -1346,8 +1521,6 @@ class TicketToRide:
                     continue
                 else:
                     available_routes.append((city1, city2, route, route.color))
-                
-        
         if available_routes:
             print("\nRoutes you can complete:")
             for city1, city2, route, color in available_routes:
@@ -1557,7 +1730,7 @@ def main():
     print("Enjoy Ticket to Ride!")
 
     console = LiveConsole()
-    num_sims = 1000
+    num_sims = 2000
     console.total_expected_games = num_sims
 
     # Main game loop
@@ -1585,7 +1758,6 @@ def main():
             game.game_state.apply_action_final(move)
             current_player.turn += 1
             #console.stop()
-
         """ Player 2 MCTS
         elif current_player.name == "Player 2":
             mcts_player2 = MCTS(game.game_state)
