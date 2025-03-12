@@ -1730,7 +1730,7 @@ def main():
     print("Enjoy Ticket to Ride!")
 
     console = LiveConsole()
-    num_sims = 2000
+    num_sims = 20000
     console.total_expected_games = num_sims
 
     # Main game loop

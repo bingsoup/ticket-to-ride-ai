@@ -19,7 +19,7 @@ class MCTSNode:
     def is_fully_expanded(self):
         possible_actions = self.state.get_legal_actions()
 
-        const = 2.3 # TODO modify exploration constant
+        const = 2 # TODO modify exploration constant
         max_children = int(math.ceil(const * math.sqrt(self.visits)))
         return len(self.children) >= min(len(possible_actions), max_children)
         """ full expansion
@@ -68,7 +68,7 @@ class MCTSNode:
         self.children.append(child_node)
         return child_node
 
-    def best_child(self, c_param=2.2):
+    def best_child(self, c_param=1.4):
         if not self.children:
             return None
         
@@ -99,12 +99,12 @@ class MCTSNode:
                         (city1 == dest.city2 and city2 == dest.city1):
                             if not self.state.current_player.uf.is_connected(dest.city1, dest.city2):
                                 # Direct connection gets high bonus
-                                dest_bonus += 1.0
+                                dest_bonus += 2.0
                     
                     # Add bonus for routes that connect to destination cities
                     for dest in self.state.current_player.destinations:
                         if city1 in (dest.city1, dest.city2) or city2 in (dest.city1, dest.city2):
-                            dest_bonus += 0.3
+                            dest_bonus += 0.5
                     
                     # Scale bonus based on number of incomplete tickets
                     uct_score += dest_bonus * (num_incomplete / 3)
@@ -112,7 +112,7 @@ class MCTSNode:
                 # Penalize drawing more destination tickets when we already have many
                 if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete >= 2:
                     # Progressive penalty: more incomplete tickets = bigger penalty
-                    uct_score -= 0.2 * num_incomplete
+                    uct_score -= 0.25 * num_incomplete
                 
                 choices_weights.append(uct_score)
         
@@ -124,17 +124,18 @@ class MCTSNode:
         destination_modifier = 0
         distance_modifier = 0
         wasted_trains = 0
-        max_depth = 20  # modify
+        max_depth = 15  # modify
         
         while not current_rollout_state.is_end() and depth < max_depth:
-            num_draw = 0
-            rem_dest = current_rollout_state.check_all_destinations(current_rollout_state.current_player)
-            num_dest = sum(1 for dest in rem_dest if dest[1] == False)
-            incr = 0
+            #num_draw = 0
+            #rem_dest = current_rollout_state.check_all_destinations(current_rollout_state.current_player)
+            #num_dest = sum(1 for dest in rem_dest if dest[1] == False)
+            #incr = 0
             possible_moves = current_rollout_state.get_legal_actions()
             if not possible_moves:
                 break
             action = self.rollout_policy(possible_moves, current_rollout_state)
+            """
             if action[0] == 'draw_destination_tickets':
                 # Quadratic penalty for drawing destination tickets
                 # num_dest is the number of uncompleted tickets
@@ -142,12 +143,15 @@ class MCTSNode:
                 # the closeness of the destination tickets
                 num_draw = sum(action[1:3])
                 destination_modifier = max((((pow(num_dest,2)) + (15 * num_draw)) // 8),destination_modifier) if num_dest > 0 else 0
+            """
+            """
             if action[0] == 'claim_route':
                 # Store the closeness of the destination tickets such that I can re-check after the route is claimed
                 rem_trains = current_rollout_state.current_player.remaining_trains
                 destinations = current_rollout_state.get_distance(current_rollout_state.current_player)
-
+            """
             current_rollout_state.apply_action(action)
+            """
             if action[0] == 'claim_route':
                 # If the closeness of the destination tickets has reduced, reward
                 rem_trains_after = current_rollout_state.current_player.remaining_trains
@@ -162,6 +166,7 @@ class MCTSNode:
                 if incr == 0:
                     wasted_trains += rem_trains - rem_trains_after
                     pass
+            """
                 
             # Opponent plays immediately after
             current_rollout_state.switch_turn()
@@ -182,7 +187,7 @@ class MCTSNode:
         action_found = False
         while not action_found:
             random_choice = random.random()
-            if random_choice < 0.02:
+            if random_choice < 0.03:
                 random_type = 'draw_destination_tickets'
             elif random_choice < 0.5:
                 random_type = 'claim_route'
@@ -367,7 +372,6 @@ def monitor_pipes(connections, update_callback, running_event):
             time.sleep(0.05)
     except Exception as e:
         print(f"Monitor thread exiting with error: {e}")
-
 
 def run_simulation(game_state, simulations_number, pipe_connection, worker_id):
     """ Runs an independent MCTS simulation for multiprocessing """
