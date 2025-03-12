@@ -71,16 +71,51 @@ class MCTSNode:
     def best_child(self, c_param=2.2):
         if not self.children:
             return None
+        
         choices_weights = []
+        
+        # Get number of incomplete destination tickets for distance biasing
+        num_incomplete = 0
+        if hasattr(self.state, 'check_all_destinations'):
+            results = self.state.check_all_destinations(self.state.current_player)
+            num_incomplete = sum(1 for dest in results if dest[1] == False)
+        
         for child in self.children:
             if child.visits == 0:
                 choices_weights.append(float('inf'))
             else:
-                # Base UCT score - TODO play around with it
+                # Base UCT score
                 uct_score = (child.value / child.visits) + \
                         c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
                 
+                # Add bias for claim_route actions that might reduce destination distances
+                if child.action and child.action[0] == 'claim_route' and num_incomplete > 0:
+                    city1, city2 = child.action[1], child.action[2]
+                    
+                    # Quick check if route directly connects destination endpoints
+                    dest_bonus = 0
+                    for dest in self.state.current_player.destinations:
+                        if (city1 == dest.city1 and city2 == dest.city2) or \
+                        (city1 == dest.city2 and city2 == dest.city1):
+                            if not self.state.current_player.uf.is_connected(dest.city1, dest.city2):
+                                # Direct connection gets high bonus
+                                dest_bonus += 1.0
+                    
+                    # Add bonus for routes that connect to destination cities
+                    for dest in self.state.current_player.destinations:
+                        if city1 in (dest.city1, dest.city2) or city2 in (dest.city1, dest.city2):
+                            dest_bonus += 0.3
+                    
+                    # Scale bonus based on number of incomplete tickets
+                    uct_score += dest_bonus * (num_incomplete / 3)
+                
+                # Penalize drawing more destination tickets when we already have many
+                if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete >= 2:
+                    # Progressive penalty: more incomplete tickets = bigger penalty
+                    uct_score -= 0.2 * num_incomplete
+                
                 choices_weights.append(uct_score)
+        
         return self.children[choices_weights.index(max(choices_weights))]
     
     def rollout(self, sim_num):
@@ -175,10 +210,10 @@ class MCTSNode:
         self.visits += 1
         self.value += result
         if self.action_type == 'draw_destination_tickets':
-            self.value -= dest_mod
+            #self.value -= dest_mod
             pass
         if self.action_type == 'claim_route':
-            self.value += dist_mod
+            #self.value += dist_mod
             pass
         if self.parent:
             self.parent.backpropagate(result,dest_mod*0.9,dist_mod*0.9)
