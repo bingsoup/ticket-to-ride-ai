@@ -54,16 +54,18 @@ class MCTSNode:
         action = random.choice(action_type)
         child_state = self.state.copy()
         child_state.apply_action(action)
+        current_player = child_state.current_player
 
-        # Opponent plays immediately after
-        child_state.switch_turn()
-        opponent_actions = child_state.get_legal_actions()
-        if opponent_actions:
-            opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
-            child_state.apply_action(opponent_action)
+        for player in child_state.players:
+            # Cycle all players
+            child_state.switch_turn()
+            if child_state.current_player.name != current_player.name:   
+                # Opponents play immediately after
+                opponent_actions = child_state.get_legal_actions()
+                if opponent_actions:
+                    opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
+                    child_state.apply_action(opponent_action)
             
-        # Back to MCTS agent's turn
-        child_state.switch_turn()        
         child_node = MCTSNode(child_state, parent=self, action=action)
         self.children.append(child_node)
         return child_node
@@ -104,7 +106,7 @@ class MCTSNode:
                     # Add bonus for routes that connect to destination cities
                     for dest in self.state.current_player.destinations:
                         if city1 in (dest.city1, dest.city2) or city2 in (dest.city1, dest.city2):
-                            dest_bonus += 0.5
+                            dest_bonus += 0.2
                     
                     # Scale bonus based on number of incomplete tickets
                     uct_score += dest_bonus * (num_incomplete / 3)
@@ -112,19 +114,23 @@ class MCTSNode:
                 # Penalize drawing more destination tickets when we already have many
                 if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete >= 2:
                     # Progressive penalty: more incomplete tickets = bigger penalty
-                    uct_score -= 0.25 * num_incomplete
+                    #uct_score -= 0.25 * num_incomplete
+                    pass
+                if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete == 0 \
+                and self.state.current_player.remaining_trains > 15:
+                    # Reward for drawing destination tickets if its easily achievable
+                    uct_score += 0.3
                 
                 choices_weights.append(uct_score)
         
         return self.children[choices_weights.index(max(choices_weights))]
     
-    def rollout(self, sim_num):
+    def rollout(self, max_depth):
         current_rollout_state = self.state.copy()
         depth = 0
         destination_modifier = 0
         distance_modifier = 0
         wasted_trains = 0
-        max_depth = 15  # modify
         
         while not current_rollout_state.is_end() and depth < max_depth:
             #num_draw = 0
@@ -167,18 +173,21 @@ class MCTSNode:
                     wasted_trains += rem_trains - rem_trains_after
                     pass
             """
-                
+            current_player = current_rollout_state.current_player  
             # Opponent plays immediately after
-            current_rollout_state.switch_turn()
-            opponent_actions = current_rollout_state.get_legal_actions()
-            if not opponent_actions:
-                break
-            opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
-            current_rollout_state.apply_action(opponent_action)
-            # Back to MCTS agent's turn
-            current_rollout_state.switch_turn()    
+            for player in current_rollout_state.players:
+                # Cycle all players
+                current_rollout_state.switch_turn()
+                if current_rollout_state.current_player.name != current_player.name:   
+                    # Opponents play immediately after
+                    opponent_actions = current_rollout_state.get_legal_actions()
+                    if opponent_actions:
+                        opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
+                        current_rollout_state.apply_action(opponent_action)
+            if current_rollout_state.current_player.name != current_player.name:
+                pass
             depth += 1  
-        # TODO return the depth and work backwords to give rewards for the specific move
+        # TODO return the depth and work backwards to give rewards for the specific move?
         distance_modifier -= wasted_trains * 1.8
         return current_rollout_state, destination_modifier, distance_modifier
 
@@ -203,14 +212,14 @@ class MCTSNode:
             if random.random() < 0.8:
                 action_type = action_type[:len(action_type)//2]
         if random_type == 'claim_route':
-            # 50% of the time, attempt to claim a helpful route
+            # 60% of the time, attempt to claim a helpful route
             if random.random() < 0.6: # TODO change the constant
                 best_route = current_rollout_state.select_best_route_action(action_type)
                 if best_route:
                     return best_route
             
         return random.choice(action_type)
-
+    
     def backpropagate(self, result,dest_mod,dist_mod):
         self.visits += 1
         self.value += result
@@ -228,10 +237,10 @@ class MCTS:
         self.root = MCTSNode(game_state)
         self.update_queue = update_queue
 
-    def best_action(self, simulations_number):
+    def best_action(self, simulations_number, max_depth):
         for sim_num in range(simulations_number):
             v = self.tree_policy()
-            state, dest_mod, dist_mod = v.rollout(sim_num)
+            state, dest_mod, dist_mod = v.rollout(max_depth)
             player = state.players[state.current_player_idx]
             reward = state.game_result(sim_num)
             v.backpropagate(reward,dest_mod,dist_mod)
@@ -243,8 +252,128 @@ class MCTS:
         #self.root.state.apply_action(self.root.best_child().action)
         self.root.state.print_score()
         return self.root.best_child().action
-    
-    def best_action_multi(self, update_callback, simulations_number, num_processes=8):
+ 
+    def select_initial_destinations(self, current_player):
+        """
+        Pick the destinations which are most likely to be completed using a simple heuristic.
+        
+        Returns:
+            List of binary values [1,1,0] indicating which tickets to keep
+        """
+        options = current_player.destinations
+        if not options or len(options) == 0:
+            return []
+        
+        # Get minimum number of tickets required to keep
+        min_to_keep = 2
+        num_options = len(options)
+        
+        # Get Floyd-Warshall paths for optimal routing
+        fw = self.root.state.fw
+        
+        # Store complete path sequences (not just sets of cities)
+        path_sequences = []
+        for dest in options:
+            # Get optimal path cities - preserve order to check for shared edges
+            if hasattr(fw, 'get_path'):
+                path = fw.get_path(dest.city1, dest.city2)
+            else:
+                # Fallback if get_path doesn't exist
+                path = [dest.city1, dest.city2]
+            path_sequences.append((dest, path))
+        
+        # Calculate a score for each destination ticket
+        ticket_scores = []
+        for dest_idx, (dest, path) in enumerate(path_sequences):
+            # Get direct distance between cities
+            distance = fw.get_distance(dest.city1, dest.city2)
+            
+            # Calculate points-per-train ratio (higher is better)
+            points_per_distance = dest.points / max(distance, 1)
+            
+            # Calculate path segment overlap and city intersections with other destinations
+            path_overlap_score = 0
+            intersection_score = 0
+            
+            for other_idx, (other_dest, other_path) in enumerate(path_sequences):
+                if dest_idx == other_idx:
+                    continue
+                
+                # Look for shared edges (consecutive city pairs)
+                shared_edges = 0
+                for i in range(len(path)-1):
+                    city1, city2 = path[i], path[i+1]
+                    # Check if this edge (city1->city2) exists in the other path
+                    for j in range(len(other_path)-1):
+                        if (other_path[j] == city1 and other_path[j+1] == city2) or \
+                        (other_path[j] == city2 and other_path[j+1] == city1):
+                            shared_edges += 1
+                            break
+                
+                # Add value for shared edges (major bonus - saves actual trains)
+                if shared_edges > 0:
+                    path_overlap_score += (shared_edges * other_dest.points / 15)
+                
+                # Add intersection bonus (minor bonus - potential hub cities)
+                # Check for city intersections that aren't already counted in shared edges
+                path_set = set(path)
+                other_set = set(other_path)
+                intersections = path_set.intersection(other_set)
+                
+                # Don't double-count: subtract cities that are part of shared edges
+                edge_cities = set()
+                for i in range(len(path)-1):
+                    city1, city2 = path[i], path[i+1]
+                    for j in range(len(other_path)-1):
+                        if (other_path[j] == city1 and other_path[j+1] == city2) or \
+                        (other_path[j] == city2 and other_path[j+1] == city1):
+                            edge_cities.add(city1)
+                            edge_cities.add(city2)
+                
+                # Only count intersections that aren't part of shared edges
+                unique_intersections = intersections - edge_cities
+                if unique_intersections:
+                    # Small bonus for intersecting cities (much less than shared edges)
+                    intersection_score += (len(unique_intersections) * other_dest.points / 40)
+            
+            # Calculate final score with bonuses for shared edges, intersections, and endpoints
+            final_score = points_per_distance + (path_overlap_score * 0.8) + (intersection_score * 0.2) 
+            
+            # Small penalty for very long tickets (higher risk)
+            if distance > 12:
+                final_score *= 0.9
+                
+            ticket_scores.append((dest, final_score))
+        
+        # Sort tickets by score (descending)
+        ticket_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Create result array (1 = keep, 0 = discard)
+        result = [0] * num_options
+        
+        # Keep the highest scoring tickets
+        if len(ticket_scores) >= 3 and ticket_scores[2][1] >= 1.4:
+            tickets_to_keep = 3
+        else: 
+            tickets_to_keep = min(min_to_keep, max(num_options, len(ticket_scores)))
+        
+        # Get the indices of the best tickets
+        best_tickets = [options.index(t[0]) for t in ticket_scores[:tickets_to_keep]]
+        
+        # Set those indices to 1 (keep)
+        for idx in best_tickets:
+            result[idx] = 1
+        
+        # Print info about selection
+        print("Destination ticket selection:")
+        for i, dest in enumerate(options):
+            status = "Keep" if result[i] == 1 else "Discard"
+            score = next((s for d, s in ticket_scores if d == dest), 0)
+            print(f"{status}: {dest.city1} to {dest.city2} ({dest.points} points, score: {score:.2f})")
+        
+        return result
+         
+    def best_action_multi(self, update_callback, simulations_number, max_depth, num_processes=4):
         if not self.root.state.get_legal_actions():
             return None
 
@@ -273,6 +402,7 @@ class MCTS:
                     run_simulation, 
                     self.root.state, 
                     simulations_per_process, 
+                    max_depth,
                     child_connections[i],
                     i
                 ) for i in range(num_processes)
@@ -342,7 +472,6 @@ class MCTS:
                 current_node = next_node
         return current_node
 
-
 def monitor_pipes(connections, update_callback, running_event):
     """Monitor all pipe connections for updates and call the update callback"""
     total_games = 0
@@ -373,7 +502,7 @@ def monitor_pipes(connections, update_callback, running_event):
     except Exception as e:
         print(f"Monitor thread exiting with error: {e}")
 
-def run_simulation(game_state, simulations_number, pipe_connection, worker_id):
+def run_simulation(game_state, simulations_number, max_depth, pipe_connection, worker_id):
     """ Runs an independent MCTS simulation for multiprocessing """
     local_mcts = MCTS(game_state)
     
@@ -383,7 +512,7 @@ def run_simulation(game_state, simulations_number, pipe_connection, worker_id):
         for i in range(simulations_number):
             v = local_mcts.tree_policy()
             if v:
-                state, dest_mod, dist_mod = v.rollout(i)
+                state, dest_mod, dist_mod = v.rollout(max_depth)
                 player = state.players[state.current_player_idx]
                 reward = state.game_result(i)
                 v.backpropagate(reward,dest_mod,dist_mod)
