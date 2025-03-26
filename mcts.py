@@ -1,9 +1,5 @@
-from concurrent.futures import ProcessPoolExecutor
 import math
 import random
-import time
-from multiprocessing import Pipe
-import threading
 #from graph import visualize_mcts_tree as viz_mcts
 
 class MCTSNode:
@@ -214,9 +210,15 @@ class MCTSNode:
         if random_type == 'claim_route':
             # 60% of the time, attempt to claim a helpful route
             if random.random() < 0.6: # TODO change the constant
-                best_route = current_rollout_state.select_best_route_action(action_type)
-                if best_route:
-                    return best_route
+                best_routes = current_rollout_state.select_best_route_action(action_type)
+                if best_routes:
+                    return best_routes[random.randint(0,len(best_routes)-1)]
+        if random_type == 'draw_two_train_cards':
+            # 50% of the time, draw the most helpful cards
+            if random.random() < 0.5: # TODO change the constant
+                best_cards = current_rollout_state.select_best_draw_action(action_type)
+                if best_cards:
+                    return best_cards
             
         return random.choice(action_type)
     
@@ -372,85 +374,6 @@ class MCTS:
             print(f"{status}: {dest.city1} to {dest.city2} ({dest.points} points, score: {score:.2f})")
         
         return result
-         
-    def best_action_multi(self, update_callback, simulations_number, max_depth, num_processes=4):
-        if not self.root.state.get_legal_actions():
-            return None
-
-        simulations_per_process = simulations_number // num_processes
-        
-        # create pipes for each worker process
-        pipes = [Pipe() for _ in range(num_processes)]
-        parent_connections = [p[0] for p in pipes]
-        child_connections = [p[1] for p in pipes]
-        
-        # start monitoring thread if update_callback is given
-        monitor_running = threading.Event()
-        if update_callback:
-            monitor_thread = threading.Thread(
-                target=monitor_pipes, 
-                args=(parent_connections, update_callback, monitor_running)
-            )
-            monitor_thread.daemon = True
-            monitor_running.set()
-            monitor_thread.start()
-
-        with ProcessPoolExecutor(max_workers=num_processes) as executor:
-            # pass child connection to each worker
-            futures = [
-                executor.submit(
-                    run_simulation, 
-                    self.root.state, 
-                    simulations_per_process, 
-                    max_depth,
-                    child_connections[i],
-                    i
-                ) for i in range(num_processes)
-            ]
-            
-            # collect results - these are now MCTS objects
-            mcts_results = [future.result() for future in futures]
-        
-        # stop monitoring thread
-        monitor_running.clear()
-        if update_callback:
-            # close parents
-            for conn in parent_connections:
-                conn.close()
-        
-        # close children (incase)
-        for conn in child_connections:
-            conn.close()
-
-        if not mcts_results:
-            return None
-        
-        # Get best actions from each MCTS instance
-        valid_actions = []
-        for mcts in mcts_results:
-            best_child = mcts.root.best_child() if mcts and mcts.root and mcts.root.children else None
-            if best_child:
-                valid_actions.append((best_child.action, mcts))
-        
-        if not valid_actions:
-            return None
-                
-        # Find the most common action
-        actions = [a[0] for a in valid_actions]
-        best_action = max(set(actions), key=actions.count)
-        
-        # Find a MCTS instance that chose this action
-        for action, mcts in valid_actions:
-            if action == best_action:
-                """ # Visualize the tree
-                viz_mcts(self.root, max_depth=4, 
-                            filename=f"mcts_tree_turn_{self.root.state.current_player.turn}.png")
-                """
-                mcts.root.state.print_score()
-                return best_action
-        
-        # Fallback (shouldn't reach here)
-        return valid_actions[0][0] if valid_actions else None
 
     def tree_policy(self):
         current_node = self.root
@@ -471,70 +394,3 @@ class MCTS:
                     return current_node
                 current_node = next_node
         return current_node
-
-def monitor_pipes(connections, update_callback, running_event):
-    """Monitor all pipe connections for updates and call the update callback"""
-    total_games = 0
-
-    try:
-        while running_event.is_set():
-            for conn in connections:
-                try:
-                    # Check if there's data available without blocking
-                    if conn.poll():
-                        # Get update data from pipe
-                        update = conn.recv()
-                        if update and 'player' in update:
-                            total_games += 1
-                            # Call the callback with update data
-                            player_info = update['player']
-                            game_num = update['game_num']
-                            worker_id = update['worker_id']
-                            update_callback(game_num, player_info, worker_id, total_games)
-                except EOFError:
-                    # Connection closed
-                    continue
-                except Exception as e:
-                    print(f"Error receiving from pipe: {e}")
-            
-            # Small sleep to prevent CPU spinning
-            time.sleep(0.05)
-    except Exception as e:
-        print(f"Monitor thread exiting with error: {e}")
-
-def run_simulation(game_state, simulations_number, max_depth, pipe_connection, worker_id):
-    """ Runs an independent MCTS simulation for multiprocessing """
-    local_mcts = MCTS(game_state)
-    
-    local_sim_count = 0
-    
-    try:
-        for i in range(simulations_number):
-            v = local_mcts.tree_policy()
-            if v:
-                state, dest_mod, dist_mod = v.rollout(max_depth)
-                player = state.players[state.current_player_idx]
-                reward = state.game_result(i)
-                v.backpropagate(reward,dest_mod,dist_mod)
-                
-                # update pipe every 10 simulations
-                local_sim_count += 1
-                if local_sim_count % 10 == 0:
-                    try:
-                        update_data = {
-                            'game_num': local_sim_count,
-                            'worker_id': worker_id,
-                            'player': {
-                                'name': player.name,
-                                'points': reward
-                            }
-                        }
-                        pipe_connection.send(update_data)
-                    except Exception as e:
-                        print(f"Error sending update: {e}")
-    finally:
-        # must close pipe
-        pipe_connection.close()
-    
-    # Return the entire MCTS object instead of just the best child
-    return local_mcts

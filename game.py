@@ -5,9 +5,9 @@ from mcts import MCTS
 from console import LiveConsole
 #from graph import TicketToRideVisualizer
 from fw import FloydWarshall
-from randomAgent import RandomAgent
 from map_data import MapData
 from helper_classes import UnionFind, Destination, Player, Color, Route
+from heuristic_agents import DestinationHeuristic, LongestRouteHeuristic, OpportunisticHeuristic, RandomHeuristic, BestMoveHeuristic
 
 # Handles the game state, including the board, players, current player index, score, train deck, destination deck, and face-up cards
 class GameState:
@@ -26,7 +26,9 @@ class GameState:
         self.update = None # Update queue for visualizer
         self.routes_cache = {}    # Player dependent cache for unclaimed routes
         self.routes_cache_valid = {}   # Flag to indicate if cache needs update
-        self.map_type = "Europe" # Default map type
+        self.best_routes_cache = {}    # Player dependent cache for best routes
+        self.best_routes_cache_valid = {} # Flag to indicate if cache needs update
+        self.map_type = "USA" # Default map type
         self.map_data = None # Map data object
         
     def init(self, players: List[Player]):
@@ -47,8 +49,6 @@ class GameState:
         self.current_player = self.players[self.current_player_idx]
 
         self.init_uf()
-        
-        pass
     
     def formatted_trains(self, player: Player) -> List[str]: 
         return [f"{color.name.capitalize()}: {count}" for color, count in player.train_cards.items() if count > 0]
@@ -472,9 +472,11 @@ class GameState:
                     if self.adjacency[i][j]:  # Only copy non-empty lists
                         new_state.adjacency[i][j] = [Route(r.length, r.color, r.claimed_by) for r in self.adjacency[i][j]]
         
-        # Create fresh cache for better performance
+        # Copy caches over
         new_state.routes_cache = self.routes_cache.copy() if self.routes_cache else {}
         new_state.routes_cache_valid = self.routes_cache_valid.copy() if self.routes_cache_valid else {}
+        new_state.best_routes_cache = self.best_routes_cache.copy() if self.best_routes_cache else {}
+        new_state.best_routes_cache_valid = self.best_routes_cache_valid.copy() if self.best_routes_cache_valid else {}
         
         # Handle FloydWarshall - lazy instantiation
         new_state.fw = self.fw
@@ -529,13 +531,21 @@ class GameState:
                     route_length = self.get_route_length(city1, city2)
                     total_length = (route_length + num_hits)
 
+                    # Calculate the minimum number of wilds the player now has to use to complete the route
+                    # Or return False if not possible because of too many tunnel hits.
                     if num_hits > 0:
                         if total_length > player.train_cards[color]:
                             wilds_used += total_length - player.train_cards[color]
                             if wilds_used > player.train_cards[Color.WILD]:
                                 if wilds_used > player.train_cards[Color.WILD]:
                                     return False
-                            
+                                
+                    # If the route is in the best routes cache, invalidate it
+                    if self.best_routes_cache.get(player_name, False):
+                        for i in range(len(self.best_routes_cache[player.name])):
+                            if (self.best_routes_cache[player.name][i][1] == (city1 or city2) and self.best_routes_cache[player.name][i][2] == (city1 or city2)):
+                                self.best_routes_cache_valid[player.name] = False
+
                     player.train_cards[Color.WILD] -= wilds_used
                     player.train_cards[color] -= max(0, total_length - wilds_used)
                     self.discard_deck.extend([Color.WILD] * wilds_used)
@@ -551,6 +561,10 @@ class GameState:
             case ["draw_destination_tickets", i, j, k, player_name]:
                 choices = []
                 destinations = []
+                # If we draw a destination ticket, invalidate the best routes cache
+                if self.best_routes_cache_valid.get(player_name, False):
+                    self.best_routes_cache_valid[player_name] = False
+
                 if len(self.destination_deck) < 3:
                     self.destination_deck.extend(self.destination_discard_deck)
                     self.destination_discard_deck.clear()
@@ -781,14 +795,15 @@ class GameState:
     
     def select_best_route_action(self, route_actions):
         """
-        Selects a route action that helps complete destination tickets.
+        Selects a route action that helps complete destination tickets,
+        with a penalty for routes requiring additional cards.
         
         Args:
             route_actions: List of claim_route actions
             
         Returns:
             A claim_route action that helps complete a destination ticket,
-            or a random action if none are particularly beneficial
+            or None if none are particularly beneficial
         """
         if not route_actions:
             return None
@@ -810,14 +825,23 @@ class GameState:
         # Check if claiming a route directly completes a destination
         for action in route_actions:
             city1, city2 = action[1], action[2]
+            color = action[3]
+            wilds_used = action[4]
+            route = action[5]
             score = 0
+
+            # Calculate card penalty (100 points per card needed)
+            route_length = route.length
+            cards_available = player.train_cards[color]
+            cards_needed = max(0, route_length - cards_available - player.train_cards[Color.WILD])
+            card_penalty = cards_needed * 100
             
             # Check if this route directly connects the endpoints of a destination
             for dest in player.destinations:
                 if (city1 == dest.city1 and city2 == dest.city2) or (city1 == dest.city2 and city2 == dest.city1):
                     if not player.uf.is_connected(dest.city1, dest.city2):
-                        # Direct completion - highest priority
-                        beneficial_actions.append((action, 1000 + dest.points))
+                        # Direct completion - highest priority, but with card penalty
+                        beneficial_actions.append((action, 1000 + dest.points - card_penalty))
                         continue
             
             # Check if route connects clusters that contain destination endpoints
@@ -832,7 +856,7 @@ class GameState:
                 
                 if c1_connected and c2_connected:
                     # This route will connect two clusters containing our destination endpoints
-                    beneficial_actions.append((action, 500 + dest.points))
+                    beneficial_actions.append((action, 500 + dest.points - card_penalty))
                     connects_clusters = True
                     break
             
@@ -858,7 +882,8 @@ class GameState:
                 score += dest.points // 2
             
             if score > 0:
-                beneficial_actions.append((action, score))
+                # Apply card penalty to this score too
+                beneficial_actions.append((action, score - card_penalty))
         
         # If we found beneficial actions, choose from the top ones
         if beneficial_actions:
@@ -867,11 +892,113 @@ class GameState:
             
             # Choose from the top 3 or fewer if there aren't that many
             top_count = min(3, len(beneficial_actions))
-            return beneficial_actions[random.randint(0, top_count-1)][0]
+            top_actions = []
+            for i in range(top_count):
+                top_actions.append(beneficial_actions[i][0])
+
+            return top_actions
         
-        # If no beneficial actions found, return a random action
+        # If no beneficial actions found, return no action
         return None
-    
+        
+    def select_best_draw_action(self, draw_actions):
+        """
+        Selects a draw action that helps complete destination tickets,
+        with a penalty for routes requiring additional cards.
+        
+        Args:
+            draw_actions: List of draw actions
+            
+        Returns:
+            The most beneficial draw action,
+            or None if none are beneficial
+        """
+        # Assume the player can claim any route
+        n = len(self.city_names)
+
+        current_player = self.current_player
+        cache_key = current_player.name
+        
+        if cache_key in self.best_routes_cache and self.best_routes_cache_valid.get(cache_key, False):
+            best_routes = self.best_routes_cache[cache_key]
+        else:
+            # Construct a list of all possible route actions with no card expectations
+            route_actions = []
+            for i in range(n):
+                city1 = self.idx_to_city[i]
+                for j in range(i+1, n):  
+                    city2 = self.idx_to_city[j]
+                    routes_list = self.adjacency[i][j]
+                    for route in routes_list:
+                        if route.claimed_by is None:
+                            if current_player.remaining_trains > route.length:
+                                # For gray routes, check each color
+                                if route.color == Color.GRAY:
+                                    for color in Color:
+                                        if color != Color.WILD and color != Color.GRAY:
+                                            route_actions.append(
+                                                        ("claim_route", city1, city2, color, 0, route, current_player.name)
+                                                    )  
+                                else:
+                                    # For colored routes
+                                    color = route.color  
+                                    route_actions.append(
+                                                        ("claim_route", city1, city2, color, 0, route, current_player.name)
+                                                    )
+            # Best possible route
+            best_routes = self.select_best_route_action(route_actions)
+            # Cache them
+            self.best_routes_cache_valid[cache_key] = True 
+            self.best_routes_cache[cache_key] = best_routes
+
+        if not best_routes:
+            return None
+        
+        # Set best and second best colors
+        best_color = best_routes[0][3]
+        if len(best_routes) > 1:
+            best_color_2 = best_routes[1][3]
+            if best_color_2 == best_color:
+                if len(best_routes) > 2:
+                    best_color_2 = best_routes[2][3]
+                else:
+                    best_color_2 = best_color
+        else:
+            best_color_2 = best_color
+
+        # Store actions which include the best color
+        best_draw_actions = []
+        for action in draw_actions:
+            if (action[2] or action[4]) == best_color:
+                best_draw_actions.append(action)
+        
+        # If there are any actions that draw two of the best colour or a combo of best and second best, return that
+        if len(best_draw_actions) > 0:
+            
+            for action in best_draw_actions:
+                if action[2] == action[4]:
+                    return action
+                elif (action[2] or action[4]) == best_color_2:
+                    return action
+                
+            # Otherwise just return any action that draws the best colour
+            return best_draw_actions[0]
+
+        # If no actions draw the best colour, try with second best colour
+        best_draw_actions = []
+        for action in draw_actions:
+             if (action[2] or action[4]) == best_color_2:
+                best_draw_actions.append(action)
+        
+        if len(best_draw_actions) > 0:
+            for action in best_draw_actions:
+                if (action[2] and action[4]) == best_color_2:
+                    return action
+            return best_draw_actions[0]
+        
+        # Couldn't find any actions that draw the best or second best color
+        return None
+
     def switch_turn(self):
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
         self.current_player = self.players[self.current_player_idx]
@@ -972,10 +1099,6 @@ def main():
         Player(name="Player 1", train_cards={color: 0 for color in Color}, 
             destinations=[], claimed_connections=[], points=0, turn=1),
         Player(name="Player 2", train_cards={color: 0 for color in Color}, 
-            destinations=[], claimed_connections=[], points=0, turn=1),
-        Player(name="Player 3", train_cards={color: 0 for color in Color}, 
-            destinations=[], claimed_connections=[], points=0, turn=1),
-        Player(name="Player 4", train_cards={color: 0 for color in Color}, 
             destinations=[], claimed_connections=[], points=0, turn=1)
     ]
 
@@ -988,7 +1111,7 @@ def main():
  
     console = LiveConsole()
     num_sims = 7000
-    max_depth = 10
+    max_depth = 15
     console.total_expected_games = num_sims
 
     # Main game loop
@@ -1015,15 +1138,16 @@ def main():
             print(f"Time taken for turn: {tet-tst} seconds")
             #console.stop()
         elif current_player.name == "Player 2":
+            """Heuristic agents..."""
             print(f"\n{current_player.name} Turn: {current_player.turn}")
             tst = time.time()
-            mcts_player = MCTS(game)
+            heuristic_player = BestMoveHeuristic(game)
             if current_player.turn == 1:
                 # MCTS picks initial destination tickets
                 destinations = mcts_player.select_initial_destinations(current_player)
                 game.remove_destination_tickets(current_player, destinations)
 
-            best_action = mcts_player.best_action(num_sims, max_depth) # with heuristics
+            best_action = heuristic_player.choose_action() 
             game.apply_action_final(best_action)
             current_player.turn += 1
             tet = time.time()
