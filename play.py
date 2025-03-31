@@ -1,8 +1,8 @@
 from helper_classes import Color, Destination, Player, Route
 # General game class for player interaction
 class TicketToRideGame:
-    def __init__(self):
-        self.game_state = None
+    def __init__(self, game_state):
+        self.game_state = game_state
         self.god_mode = False
         
     def print_board(self):

@@ -2,13 +2,30 @@ import time
 from typing import List, Optional,Tuple
 import random
 from mcts import MCTS
-from console import LiveConsole
+#from console import LiveConsole
 #from graph import TicketToRideVisualizer
 from fw import FloydWarshall
 from map_data import MapData
 from helper_classes import UnionFind, Destination, Player, Color, Route
 from heuristic_agents import DestinationHeuristic, LongestRouteHeuristic, OpportunisticHeuristic, RandomHeuristic, BestMoveHeuristic
-
+from play import TicketToRideGame
+import platform
+is_pypy = platform.python_implementation() == 'PyPy'
+# Only import GUI modules if not running under PyPy
+if not is_pypy:
+    try:
+        from gui import initialize_gui, update_game_state, shutdown
+        gui_available = True
+    except ImportError:
+        gui_available = False
+        print("GUI modules couldn't be imported. Running in console-only mode.")
+else:
+    # Create dummy functions for GUI operations when running under PyPy
+    gui_available = False
+    def initialize_gui(): return False
+    def update_game_state(game, action=None): pass
+    def shutdown(): pass
+    print("Running under PyPy - GUI disabled for compatibility.")
 # Handles the game state, including the board, players, current player index, score, train deck, destination deck, and face-up cards
 class GameState:
     def __init__(self):
@@ -385,33 +402,21 @@ class GameState:
                 destination_results.append((destination, False))
         return destination_results
     
-    def calc_route_points(self, route_length: int) -> int:
-        if self.map_type == "USA":  
-            if route_length == 1:
-                return 1
-            elif route_length == 2:
-                return 2
-            elif route_length == 3:
-                return 4
-            elif route_length == 4:
-                return 7
-            elif route_length == 5:
-                return 10
-            elif route_length == 6:
-                return 15
-        else:
-            if route_length == 1:
-                return 1
-            elif route_length == 2:
-                return 2
-            elif route_length == 3:
-                return 4
-            elif route_length == 4:
-                return 7
-            elif route_length == 6:
-                return 15
-            elif route_length == 8:
-                return 21
+    def calc_route_points(self, route_length: int) -> int:  
+        if route_length == 1:
+            return 1
+        elif route_length == 2:
+            return 2
+        elif route_length == 3:
+            return 4
+        elif route_length == 4:
+            return 7
+        elif route_length == 5:
+            return 10
+        elif route_length == 6:
+            return 15
+        elif route_length == 8:
+            return 21
         
     def print_owned_routes(self):
         for player in self.players:
@@ -553,7 +558,11 @@ class GameState:
                     player.claimed_connections.append((city1, city2, color))
                     player.claimed_cities.add(city1)
                     player.claimed_cities.add(city2)
-                    player.points += self.calc_route_points(route_length)
+                    points = self.calc_route_points(route_length)
+                    if points is not None:
+                        player.points += points
+                    else:
+                        print(f"Error: route length is {route_length}")
                     player.uf.union(city1, city2)
                     player.remaining_trains -= route_length
                     return True
@@ -999,6 +1008,126 @@ class GameState:
         # Couldn't find any actions that draw the best or second best color
         return None
 
+    def select_initial_destinations(self, current_player):
+        """
+        Pick the destinations which are most likely to be completed using a simple heuristic.
+        
+        Returns:
+            List of binary values [1,1,0] indicating which tickets to keep
+        """
+        options = current_player.destinations
+        if not options or len(options) == 0:
+            return []
+        
+        # Get minimum number of tickets required to keep
+        min_to_keep = 2
+        num_options = len(options)
+        
+        # Get Floyd-Warshall paths for optimal routing
+        fw = self.fw
+        
+        # Store complete path sequences (not just sets of cities)
+        path_sequences = []
+        for dest in options:
+            # Get optimal path cities - preserve order to check for shared edges
+            if hasattr(fw, 'get_path'):
+                path = fw.get_path(dest.city1, dest.city2)
+            else:
+                # Fallback if get_path doesn't exist
+                path = [dest.city1, dest.city2]
+            path_sequences.append((dest, path))
+        
+        # Calculate a score for each destination ticket
+        ticket_scores = []
+        for dest_idx, (dest, path) in enumerate(path_sequences):
+            # Get direct distance between cities
+            distance = fw.get_distance(dest.city1, dest.city2)
+            
+            # Calculate points-per-train ratio (higher is better)
+            points_per_distance = dest.points / max(distance, 1)
+            
+            # Calculate path segment overlap and city intersections with other destinations
+            path_overlap_score = 0
+            intersection_score = 0
+            
+            for other_idx, (other_dest, other_path) in enumerate(path_sequences):
+                if dest_idx == other_idx:
+                    continue
+                
+                # Look for shared edges (consecutive city pairs)
+                shared_edges = 0
+                for i in range(len(path)-1):
+                    city1, city2 = path[i], path[i+1]
+                    # Check if this edge (city1->city2) exists in the other path
+                    for j in range(len(other_path)-1):
+                        if (other_path[j] == city1 and other_path[j+1] == city2) or \
+                        (other_path[j] == city2 and other_path[j+1] == city1):
+                            shared_edges += 1
+                            break
+                
+                # Add value for shared edges (major bonus - saves actual trains)
+                if shared_edges > 0:
+                    path_overlap_score += (shared_edges * other_dest.points / 15)
+                
+                # Add intersection bonus (minor bonus - potential hub cities)
+                # Check for city intersections that aren't already counted in shared edges
+                path_set = set(path)
+                other_set = set(other_path)
+                intersections = path_set.intersection(other_set)
+                
+                # Don't double-count: subtract cities that are part of shared edges
+                edge_cities = set()
+                for i in range(len(path)-1):
+                    city1, city2 = path[i], path[i+1]
+                    for j in range(len(other_path)-1):
+                        if (other_path[j] == city1 and other_path[j+1] == city2) or \
+                        (other_path[j] == city2 and other_path[j+1] == city1):
+                            edge_cities.add(city1)
+                            edge_cities.add(city2)
+                
+                # Only count intersections that aren't part of shared edges
+                unique_intersections = intersections - edge_cities
+                if unique_intersections:
+                    # Small bonus for intersecting cities (much less than shared edges)
+                    intersection_score += (len(unique_intersections) * other_dest.points / 40)
+            
+            # Calculate final score with bonuses for shared edges, intersections, and endpoints
+            final_score = points_per_distance + (path_overlap_score * 0.8) + (intersection_score * 0.2) 
+            
+            # Small penalty for very long tickets (higher risk)
+            if distance > 12:
+                final_score *= 0.9
+                
+            ticket_scores.append((dest, final_score))
+        
+        # Sort tickets by score (descending)
+        ticket_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Create result array (1 = keep, 0 = discard)
+        result = [0] * num_options
+        
+        # Keep the highest scoring tickets
+        if len(ticket_scores) >= 3 and ticket_scores[2][1] >= 1.4:
+            tickets_to_keep = 3
+        else: 
+            tickets_to_keep = min(min_to_keep, max(num_options, len(ticket_scores)))
+        
+        # Get the indices of the best tickets
+        best_tickets = [options.index(t[0]) for t in ticket_scores[:tickets_to_keep]]
+        
+        # Set those indices to 1 (keep)
+        for idx in best_tickets:
+            result[idx] = 1
+        
+        # Print info about selection
+        print("Destination ticket selection:")
+        for i, dest in enumerate(options):
+            status = "Keep" if result[i] == 1 else "Discard"
+            score = next((s for d, s in ticket_scores if d == dest), 0)
+            print(f"{status}: {dest.city1} to {dest.city2} ({dest.points} points, score: {score:.2f})")
+        
+        return result
+
     def switch_turn(self):
         self.current_player_idx = (self.current_player_idx + 1) % len(self.players)
         self.current_player = self.players[self.current_player_idx]
@@ -1092,131 +1221,200 @@ class GameState:
         
 
 def main():
-    timestart=time.time()
+    timestart = time.time()
     game = GameState()
-    # Create players
-    players = [
-        Player(name="Player 1", train_cards={color: 0 for color in Color}, 
-            destinations=[], claimed_connections=[], points=0, turn=1),
-        Player(name="Player 2", train_cards={color: 0 for color in Color}, 
-            destinations=[], claimed_connections=[], points=0, turn=1)
-    ]
 
+    use_gui = input("Do you want to use the GUI? (y/n): ").lower() == 'y'
+    if use_gui:
+        initialize_gui()
+    
+    # Ask user for number of players and agent types
+    print("\nWelcome to Ticket to Ride!")
+    
+    while True:
+        try:
+            num_players = int(input("How many players? (2-4): "))
+            if 2 <= num_players <= 4:
+                break
+            else:
+                print("Please enter a number between 2 and 4.")
+        except ValueError:
+            print("Please enter a valid number.")
+    while True:
+        try:
+            map_type = input("Which map would you like to play on? (USA or Europe): ").lower()
+            if map_type == "usa":
+                game.map_type = "USA"
+                break
+            elif map_type == "europe":
+                game.map_type = "Europe"
+                break
+            else:
+                print("Please enter USA or Europe.")
+        except ValueError:
+            print("Please enter text.")
+    
+    # Define agent options
+    agent_options = {
+        1: "Human Player (Untested)",
+        2: "MCTS AI",
+        3: "Destination Heuristic AI",
+        4: "Longest Route Heuristic AI",
+        5: "Opportunistic Heuristic AI",
+        6: "Best Move Heuristic AI",
+        7: "Random AI"
+    }
+    
+    # Create players array and agent mapping
+    players = []
+    player_agents = {}  # Maps player name to agent type
+    mcts_params = {}    # Store custom MCTS parameters for each player
+    
+    for i in range(num_players):
+        print(f"\nPlayer {i+1} options:")
+        for key, value in agent_options.items():
+            print(f"{key}: {value}")
+        
+        while True:
+            try:
+                agent_type = int(input(f"Select agent type for Player {i+1}: "))
+                if 1 <= agent_type <= len(agent_options):
+                    break
+                else:
+                    print(f"Please enter a number between 1 and {len(agent_options)}.")
+            except ValueError:
+                print("Please enter a valid number.")
+        
+        # If MCTS AI is selected, prompt for parameters
+        if agent_type == 2:
+            # Get number of simulations
+            while True:
+                try:
+                    num_sims = int(input(f"Enter number of simulations for MCTS (500-20000, default: 3000)"))
+                    if 500 <= num_sims <= 20000:
+                        break
+                    else:
+                        print("Please enter a number between 500 and 20000.")
+                except ValueError:
+                    print("Please enter a valid number.")
+            
+            # Get max depth
+            while True:
+                try:
+                    max_depth = int(input(f"Enter maximum search depth for MCTS (5-50, default: 15)"))
+                    if 5 <= max_depth <= 50:
+                        break
+                    else:
+                        print("Please enter a number between 5 and 50.")
+                except ValueError:
+                    print("Please enter a valid number.")
+                    
+            # Store MCTS parameters for this player
+            player_name = f"Player {i+1}"
+            mcts_params[player_name] = {
+                "num_sims": num_sims,
+                "max_depth": max_depth
+            }
+        
+        # Create player
+        player_name = f"Player {i+1}"
+        player = Player(
+            name=player_name, 
+            train_cards={color: 0 for color in Color},
+            destinations=[], 
+            claimed_connections=[], 
+            points=0, 
+            turn=1
+        )
+        players.append(player)
+        player_agents[player_name] = agent_type  # Store the agent type
+    
     print("\n" + "_" * 200 + "\n")
     # Set up and start the game
     game.init(players)
 
+    game.player_agents = player_agents
+    game.agent_options = agent_options
+
     print("You can type back to go to the previous menu option")
     print("Enjoy Ticket to Ride!")
- 
-    console = LiveConsole()
-    num_sims = 7000
-    max_depth = 15
-    console.total_expected_games = num_sims
-
+    
+    # Default MCTS parameters (used if not customized)
+    default_num_sims = 3000
+    default_max_depth = 15
+    
     # Main game loop
     while not game.is_end():
         current_player = game.players[game.current_player_idx]
+        agent_type = player_agents[current_player.name]
         
-        if current_player.name == "Player 1":
-            print(f"\n{current_player.name} Turn: {current_player.turn}")
-            tst = time.time()
-            #console.start_live()
-            # Use MCTS to determine the best action for Player 1
-            mcts_player = MCTS(game)
-            if current_player.turn == 1:
-                # MCTS picks initial destination tickets
-                destinations = mcts_player.select_initial_destinations(current_player)
-                game.remove_destination_tickets(current_player, destinations)
-
-            #best_action = mcts_player.best_action_multi(console.update_display, num_sims, max_depth)
-            #best_action = mcts_player.best_action_random(num_sims) # no heuristic
-            best_action = mcts_player.best_action(num_sims, max_depth) # with heuristics
-            game.apply_action_final(best_action)
-            current_player.turn += 1
-            tet = time.time()
-            print(f"Time taken for turn: {tet-tst} seconds")
-            #console.stop()
-        elif current_player.name == "Player 2":
-            """Heuristic agents..."""
-            print(f"\n{current_player.name} Turn: {current_player.turn}")
-            tst = time.time()
-            heuristic_player = BestMoveHeuristic(game)
-            if current_player.turn == 1:
-                # MCTS picks initial destination tickets
-                destinations = mcts_player.select_initial_destinations(current_player)
-                game.remove_destination_tickets(current_player, destinations)
-
-            best_action = heuristic_player.choose_action() 
-            game.apply_action_final(best_action)
-            current_player.turn += 1
-            tet = time.time()
-            print(f"Time taken for turn: {tet-tst} seconds")
-        elif current_player.name == "Player 3":
-            print(f"\n{current_player.name} Turn: {current_player.turn}")
-            tst = time.time()
-            mcts_player = MCTS(game)
-            if current_player.turn == 1:
-                # MCTS picks initial destination tickets
-                destinations = mcts_player.select_initial_destinations(current_player)
-                game.remove_destination_tickets(current_player, destinations)
-
-            best_action = mcts_player.best_action(num_sims, max_depth) # with heuristics
-            game.apply_action_final(best_action)
-            current_player.turn += 1
-            tet = time.time()
-            print(f"Time taken for turn: {tet-tst} seconds")
-        elif current_player.name == "Player 4":
-            print(f"\n{current_player.name} Turn: {current_player.turn}")
-            tst = time.time()
-            #console.start_live()
-            mcts_player = MCTS(game)
-            if current_player.turn == 1:
-                # MCTS picks initial destination tickets
-                destinations = mcts_player.select_initial_destinations(current_player)
-                game.remove_destination_tickets(current_player, destinations)
-            best_action = mcts_player.best_action(num_sims, max_depth) # with heuristics
-            game.apply_action_final(best_action)
-            current_player.turn += 1
-            tet = time.time()
-            print(f"Time taken for turn: {tet-tst} seconds")
-    
-        """
-        # Random Moves
-        elif current_player.name == "Player 2":
-            random = RandomAgent(game)
-            move = random.get_action()
-            game.apply_action_final(move)
-            current_player.turn += 1
-            #console.stop()
-        """
-        # Manual
+        print(f"\n{current_player.name} ({agent_options[agent_type]}) Turn: {current_player.turn}")
+        tst = time.time()
         
+        # Handle first turn destination selection
+        if current_player.turn == 1:
+            destinations = game.select_initial_destinations(current_player)
+            game.remove_destination_tickets(current_player, destinations)
         
-        """ Player 2 Manual
-        else:
-            # Let Player 2 play their turn manually
-            game.play_turn(current_player)
-        """
+        # Execute agent-specific logic using match-case
+        match agent_type:
+            case 1:  # Human Player (not implemented)
+                player = TicketToRideGame(game)
+                best_action = player.play_turn(current_player)
+            case 2:  # MCTS AI
+                # Get player-specific MCTS parameters or use defaults
+                if current_player.name in mcts_params:
+                    params = mcts_params[current_player.name]
+                    num_sims = params["num_sims"]
+                    max_depth = params["max_depth"]
+                    print(f"Using custom MCTS parameters: {num_sims} simulations, max depth {max_depth}")
+                else:
+                    num_sims = default_num_sims
+                    max_depth = default_max_depth
+                
+                mcts_player = MCTS(game)
+                best_action = mcts_player.best_action(num_sims, max_depth)
+            case 3:  # Destination Heuristic AI
+                heuristic_player = DestinationHeuristic(game)
+                best_action = heuristic_player.choose_action()
+            case 4:  # Longest Route Heuristic AI
+                heuristic_player = LongestRouteHeuristic(game)
+                best_action = heuristic_player.choose_action()
+            case 5:  # Opportunistic Heuristic AI
+                heuristic_player = OpportunisticHeuristic(game)
+                best_action = heuristic_player.choose_action()
+            case 6:  # Best Move Heuristic AI
+                heuristic_player = BestMoveHeuristic(game)
+                best_action = heuristic_player.choose_action()
+            case 7:  # Random AI
+                random_agent = RandomHeuristic(game)
+                best_action = random_agent.choose_action()
+            
+        
+        # Apply the action and update game state
+        game.apply_action_final(best_action)
+        if use_gui:
+            update_game_state(game, best_action)
+            #pygame.event.pump()
+        current_player.turn += 1
+        tet = time.time()
+        print(f"Time taken for turn: {tet-tst} seconds")
         
         game.update_player_turn()
-        
-
     
     # Calculate final scores
     game.game_result_final(1)
 
-    #game.visualizer = TicketToRideVisualizer(game)
-    #game.visualizer.visualize_game_map() #visualize the final state of the game board
-
-    timeend=time.time()
+    timeend = time.time()
     elapsed_time = timeend - timestart
     minutes = int(elapsed_time // 60)
     seconds = int(elapsed_time % 60)
 
     print(f"Time taken: {minutes} minutes and {seconds} seconds")
+    if use_gui:
+        shutdown()
 
-    game.print_owned_routes() # TODO probably get rid of this at some point
+    game.print_owned_routes()
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,6 @@
 import math
 import random
+from heuristic_agents import DestinationHeuristic
 #from graph import visualize_mcts_tree as viz_mcts
 
 class MCTSNode:
@@ -66,7 +67,7 @@ class MCTSNode:
         self.children.append(child_node)
         return child_node
 
-    def best_child(self, c_param=1.4):
+    def best_child(self, c_param=3):
         if not self.children:
             return None
         
@@ -97,7 +98,7 @@ class MCTSNode:
                         (city1 == dest.city2 and city2 == dest.city1):
                             if not self.state.current_player.uf.is_connected(dest.city1, dest.city2):
                                 # Direct connection gets high bonus
-                                dest_bonus += 2.0
+                                dest_bonus += 1.0
                     
                     # Add bonus for routes that connect to destination cities
                     for dest in self.state.current_player.destinations:
@@ -108,14 +109,19 @@ class MCTSNode:
                     uct_score += dest_bonus * (num_incomplete / 3)
                 
                 # Penalize drawing more destination tickets when we already have many
-                if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete >= 2:
+                if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete >= 1:
                     # Progressive penalty: more incomplete tickets = bigger penalty
-                    #uct_score -= 0.25 * num_incomplete
-                    pass
+                    uct_score -= 0.15 * num_incomplete
                 if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete == 0 \
                 and self.state.current_player.remaining_trains > 15:
                     # Reward for drawing destination tickets if its easily achievable
                     uct_score += 0.3
+                
+                if child.action and child.action[0] == 'draw_two_train_cards':
+                    # Punish drawing train cards if we have many already
+                    num_cards = len(self.state.current_player.train_cards)
+                    if num_cards > 10:
+                        uct_score -= 10 * (num_cards / 10)
                 
                 choices_weights.append(uct_score)
         
@@ -176,10 +182,13 @@ class MCTSNode:
                 current_rollout_state.switch_turn()
                 if current_rollout_state.current_player.name != current_player.name:   
                     # Opponents play immediately after
-                    opponent_actions = current_rollout_state.get_legal_actions()
-                    if opponent_actions:
-                        opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
+                    opponent_action = DestinationHeuristic(current_rollout_state).choose_action()
+                    if opponent_action:
                         current_rollout_state.apply_action(opponent_action)
+                    else:
+                        opponent_actions = current_rollout_state.get_legal_actions()
+                        if opponent_actions:
+                            opponent_action = random.choice(opponent_actions)  # TODO - Could make this more advanced
             if current_rollout_state.current_player.name != current_player.name:
                 pass
             depth += 1  
@@ -192,9 +201,9 @@ class MCTSNode:
         action_found = False
         while not action_found:
             random_choice = random.random()
-            if random_choice < 0.03:
+            if random_choice < 0.33:
                 random_type = 'draw_destination_tickets'
-            elif random_choice < 0.5:
+            elif random_choice < 0.66:
                 random_type = 'claim_route'
             else:
                 random_type = 'draw_two_train_cards'
@@ -255,126 +264,6 @@ class MCTS:
         self.root.state.print_score()
         return self.root.best_child().action
  
-    def select_initial_destinations(self, current_player):
-        """
-        Pick the destinations which are most likely to be completed using a simple heuristic.
-        
-        Returns:
-            List of binary values [1,1,0] indicating which tickets to keep
-        """
-        options = current_player.destinations
-        if not options or len(options) == 0:
-            return []
-        
-        # Get minimum number of tickets required to keep
-        min_to_keep = 2
-        num_options = len(options)
-        
-        # Get Floyd-Warshall paths for optimal routing
-        fw = self.root.state.fw
-        
-        # Store complete path sequences (not just sets of cities)
-        path_sequences = []
-        for dest in options:
-            # Get optimal path cities - preserve order to check for shared edges
-            if hasattr(fw, 'get_path'):
-                path = fw.get_path(dest.city1, dest.city2)
-            else:
-                # Fallback if get_path doesn't exist
-                path = [dest.city1, dest.city2]
-            path_sequences.append((dest, path))
-        
-        # Calculate a score for each destination ticket
-        ticket_scores = []
-        for dest_idx, (dest, path) in enumerate(path_sequences):
-            # Get direct distance between cities
-            distance = fw.get_distance(dest.city1, dest.city2)
-            
-            # Calculate points-per-train ratio (higher is better)
-            points_per_distance = dest.points / max(distance, 1)
-            
-            # Calculate path segment overlap and city intersections with other destinations
-            path_overlap_score = 0
-            intersection_score = 0
-            
-            for other_idx, (other_dest, other_path) in enumerate(path_sequences):
-                if dest_idx == other_idx:
-                    continue
-                
-                # Look for shared edges (consecutive city pairs)
-                shared_edges = 0
-                for i in range(len(path)-1):
-                    city1, city2 = path[i], path[i+1]
-                    # Check if this edge (city1->city2) exists in the other path
-                    for j in range(len(other_path)-1):
-                        if (other_path[j] == city1 and other_path[j+1] == city2) or \
-                        (other_path[j] == city2 and other_path[j+1] == city1):
-                            shared_edges += 1
-                            break
-                
-                # Add value for shared edges (major bonus - saves actual trains)
-                if shared_edges > 0:
-                    path_overlap_score += (shared_edges * other_dest.points / 15)
-                
-                # Add intersection bonus (minor bonus - potential hub cities)
-                # Check for city intersections that aren't already counted in shared edges
-                path_set = set(path)
-                other_set = set(other_path)
-                intersections = path_set.intersection(other_set)
-                
-                # Don't double-count: subtract cities that are part of shared edges
-                edge_cities = set()
-                for i in range(len(path)-1):
-                    city1, city2 = path[i], path[i+1]
-                    for j in range(len(other_path)-1):
-                        if (other_path[j] == city1 and other_path[j+1] == city2) or \
-                        (other_path[j] == city2 and other_path[j+1] == city1):
-                            edge_cities.add(city1)
-                            edge_cities.add(city2)
-                
-                # Only count intersections that aren't part of shared edges
-                unique_intersections = intersections - edge_cities
-                if unique_intersections:
-                    # Small bonus for intersecting cities (much less than shared edges)
-                    intersection_score += (len(unique_intersections) * other_dest.points / 40)
-            
-            # Calculate final score with bonuses for shared edges, intersections, and endpoints
-            final_score = points_per_distance + (path_overlap_score * 0.8) + (intersection_score * 0.2) 
-            
-            # Small penalty for very long tickets (higher risk)
-            if distance > 12:
-                final_score *= 0.9
-                
-            ticket_scores.append((dest, final_score))
-        
-        # Sort tickets by score (descending)
-        ticket_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # Create result array (1 = keep, 0 = discard)
-        result = [0] * num_options
-        
-        # Keep the highest scoring tickets
-        if len(ticket_scores) >= 3 and ticket_scores[2][1] >= 1.4:
-            tickets_to_keep = 3
-        else: 
-            tickets_to_keep = min(min_to_keep, max(num_options, len(ticket_scores)))
-        
-        # Get the indices of the best tickets
-        best_tickets = [options.index(t[0]) for t in ticket_scores[:tickets_to_keep]]
-        
-        # Set those indices to 1 (keep)
-        for idx in best_tickets:
-            result[idx] = 1
-        
-        # Print info about selection
-        print("Destination ticket selection:")
-        for i, dest in enumerate(options):
-            status = "Keep" if result[i] == 1 else "Discard"
-            score = next((s for d, s in ticket_scores if d == dest), 0)
-            print(f"{status}: {dest.city1} to {dest.city2} ({dest.points} points, score: {score:.2f})")
-        
-        return result
-
     def tree_policy(self):
         current_node = self.root
         while not current_node.state.is_end():
