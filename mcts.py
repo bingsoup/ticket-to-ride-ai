@@ -1,6 +1,6 @@
 import math
 import random
-from heuristic_agents import DestinationHeuristic
+from heuristic_agents import DestinationHeuristic, RandomHeuristic
 #from graph import visualize_mcts_tree as viz_mcts
 
 class MCTSNode:
@@ -67,7 +67,7 @@ class MCTSNode:
         self.children.append(child_node)
         return child_node
 
-    def best_child(self, c_param=3):
+    def best_child(self, c_param=1.4):
         if not self.children:
             return None
         
@@ -83,7 +83,7 @@ class MCTSNode:
             if child.visits == 0:
                 choices_weights.append(float('inf'))
             else:
-                # Base UCT score
+                 # Base UCT score
                 uct_score = (child.value / child.visits) + \
                         c_param * math.sqrt((2 * math.log(self.visits) / child.visits))
                 
@@ -111,18 +111,18 @@ class MCTSNode:
                 # Penalize drawing more destination tickets when we already have many
                 if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete >= 1:
                     # Progressive penalty: more incomplete tickets = bigger penalty
-                    uct_score -= 0.15 * num_incomplete
+                    uct_score -= 5 * num_incomplete
                 if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete == 0 \
                 and self.state.current_player.remaining_trains > 15:
                     # Reward for drawing destination tickets if its easily achievable
-                    uct_score += 0.3
-                
+                    uct_score += 3
+                """
                 if child.action and child.action[0] == 'draw_two_train_cards':
                     # Punish drawing train cards if we have many already
                     num_cards = len(self.state.current_player.train_cards)
                     if num_cards > 10:
                         uct_score -= 10 * (num_cards / 10)
-                
+                """
                 choices_weights.append(uct_score)
         
         return self.children[choices_weights.index(max(choices_weights))]
@@ -182,7 +182,8 @@ class MCTSNode:
                 current_rollout_state.switch_turn()
                 if current_rollout_state.current_player.name != current_player.name:   
                     # Opponents play immediately after
-                    opponent_action = DestinationHeuristic(current_rollout_state).choose_action()
+                    #opponent_action = DestinationHeuristic(current_rollout_state).choose_action()
+                    opponent_action = RandomHeuristic(current_rollout_state).choose_action()
                     if opponent_action:
                         current_rollout_state.apply_action(opponent_action)
                     else:
@@ -201,9 +202,19 @@ class MCTSNode:
         action_found = False
         while not action_found:
             random_choice = random.random()
-            if random_choice < 0.33:
+            dest_mod = 0
+            destinations = current_rollout_state.check_all_destinations(current_rollout_state.current_player)
+            sum_dest = sum(1 for dest in destinations if dest[1] == False)
+            if sum_dest >= 2:
+                dest_mod = 0
+            elif sum_dest == 1:
+                dest_mod = 0.05
+            elif sum_dest == 0:
+                dest_mod = 0.15
+
+            if random_choice < dest_mod:
                 random_type = 'draw_destination_tickets'
-            elif random_choice < 0.66:
+            elif random_choice < 0.50:
                 random_type = 'claim_route'
             else:
                 random_type = 'draw_two_train_cards'
@@ -228,7 +239,7 @@ class MCTSNode:
                 best_cards = current_rollout_state.select_best_draw_action(action_type)
                 if best_cards:
                     return best_cards
-            
+        
         return random.choice(action_type)
     
     def backpropagate(self, result,dest_mod,dist_mod):

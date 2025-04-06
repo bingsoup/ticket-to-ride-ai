@@ -1,12 +1,14 @@
+import copy
 import time
 from typing import List, Optional,Tuple
 import random
 from mcts import MCTS
+from mcts_no_heuristics import MCTS as MCTS_no_heuristics
 #from console import LiveConsole
 #from graph import TicketToRideVisualizer
 from fw import FloydWarshall
 from map_data import MapData
-from helper_classes import UnionFind, Destination, Player, Color, Route
+from helper_classes import UnionFind, Destination, Player, Color, Route, UnionFind
 from heuristic_agents import DestinationHeuristic, LongestRouteHeuristic, OpportunisticHeuristic, RandomHeuristic, BestMoveHeuristic
 from play import TicketToRideGame
 import platform
@@ -300,6 +302,15 @@ class GameState:
         
         return route_actions
     
+    def cache_update_helper(self, city1, city2):
+        """Update the unclaimed routes cache when a route is claimed"""
+        if hasattr(self, '_unclaimed_routes_cache'):
+            i = self.city_to_idx[city1]
+            j = self.city_to_idx[city2]
+            # If the route is claimed, remove it from the cache
+            self.unclaimed_routes_cache = [(a, b, r) for a, b, r in self.unclaimed_routes_cache 
+                                        if not ((a == i and b == j) or (a == j and b == i))]
+    
     def claim_route_helper(self, color: Color, player: str, num_hits: int, routes) -> bool:
         """Claims the route if possible, otherwise returns False."""
         claimed = [False] * len(routes)
@@ -372,7 +383,7 @@ class GameState:
         """Draw a face-up card."""
         if len(self.train_deck) == 0:
             if len(self.discard_deck) == 0:
-                print("Broken")
+                #print("Broken")
                 return
             self.train_deck.extend(self.discard_deck)
             self.discard_deck.clear()
@@ -384,7 +395,7 @@ class GameState:
         """Draw a card from the train deck."""
         if len(self.train_deck) == 0:
             if len(self.discard_deck) == 0:
-                print("Broken")
+                #print("Broken")
                 return
             self.train_deck.extend(self.discard_deck)
             self.discard_deck.clear()
@@ -505,12 +516,9 @@ class GameState:
             new_player.turn = player.turn
             
             # Recreate UnionFind instead of copying it
-            if player.uf:
-                new_player.uf = UnionFind(self.city_names)
-                # Only rebuild connections that matter
-                for city1, city2, _ in player.claimed_connections:
-                    new_player.uf.union(city1, city2)
             
+            new_player.uf = UnionFind(self.city_names)
+
             new_state.players.append(new_player)
         
         # Fix current player reference
@@ -564,6 +572,8 @@ class GameState:
                     else:
                         print(f"Error: route length is {route_length}")
                     player.uf.union(city1, city2)
+
+                    self.cache_update_helper(city1, city2)
                     player.remaining_trains -= route_length
                     return True
                 return False
@@ -590,7 +600,7 @@ class GameState:
                     destinations.append(choices[random.randint(0,2)])
                 self.destination_discard_deck.extend([dest for dest in choices if dest not in destinations])
                 self.current_player.destinations.extend(destinations)
-
+    
     def apply_action_final(self, action):
         success = self.apply_action(action)
 
@@ -666,7 +676,6 @@ class GameState:
                                 legal_actions.append(("draw_destination_tickets", i, j, k, current_player.name))
         return legal_actions
 
-    
     def one_off(self,) -> bool:
         #Check if the player only needs one more turn to finish a destination ticket.
         player = self.current_player
@@ -929,7 +938,7 @@ class GameState:
         cache_key = current_player.name
         
         if cache_key in self.best_routes_cache and self.best_routes_cache_valid.get(cache_key, False):
-            best_routes = self.best_routes_cache[cache_key]
+            best_routes = self.best_routes_cache[cache_key].copy()
         else:
             # Construct a list of all possible route actions with no card expectations
             route_actions = []
@@ -957,8 +966,9 @@ class GameState:
             # Best possible route
             best_routes = self.select_best_route_action(route_actions)
             # Cache them
-            self.best_routes_cache_valid[cache_key] = True 
-            self.best_routes_cache[cache_key] = best_routes
+            if best_routes:
+                self.best_routes_cache_valid[cache_key] = True 
+                self.best_routes_cache[cache_key] = best_routes.copy()
 
         if not best_routes:
             return None
@@ -1133,35 +1143,28 @@ class GameState:
         self.current_player = self.players[self.current_player_idx]
 
     def game_result(self, game_num):
-        player = self.current_player
-        opponent = self.players[(self.current_player_idx + 1) % len(self.players)]
-        
-        # Calculate destination ticket points
-        destination_results = self.check_all_destinations(player)
-        for destination, is_complete in destination_results:
-            if is_complete:
-                player.points += destination.points
-            else:
-                player.points -= destination.points
-        
-        # Award longest route bonus (10 points)
-        player_longest = self.get_longest_route_length(player)
-        opponent_longest = self.get_longest_route_length(opponent)
-        
-        # Store the length for potential display/debugging
-        player.longest_route_length = player_longest
-        opponent.longest_route_length = opponent_longest
-        
-        # Award bonus to player with longer route
-        if player_longest > opponent_longest:
-            player.points += 10  # Bonus for longest route
-        elif player_longest < opponent_longest:
-            opponent.points += 10
-        else:
-            player.points += 10  # Award to both players in case of tie
-            opponent.points += 10  
-        if self.update:
-            self.update.publish("mcts_update", game_num, player)
+        # Calculate final scores for each player to return to MCTS
+        longest_score = 5
+        longest_player = None
+        current_player = self.current_player
+        final_points = 0
+        for player in self.players:
+            destination_results = self.check_all_destinations(player)
+            longest = self.get_longest_route_length(player)
+
+            if longest >= longest_score:
+                longest_score = longest
+                longest_player = player
+
+            for destination, is_complete in destination_results:
+                if is_complete:
+                    player.points += destination.points
+                else:
+                    player.points -= destination.points
+
+        if longest_player:
+            longest_player.points += 10
+
         return player.points
     
     def print_score(self):
@@ -1219,18 +1222,25 @@ class GameState:
             print(f"Longest continuous route: {self.get_longest_route_length(player)}")
             print("Final score: ", player.points)
         
+        for player in self.players:
+            if player.points == max([p.points for p in self.players]):
+                player.winner = True
+                player.wins += 1
+                print(f"{player.name} wins!")
+        
+        return self.players
+        
 
 def main():
     timestart = time.time()
-    game = GameState()
-
-    use_gui = input("Do you want to use the GUI? (y/n): ").lower() == 'y'
-    if use_gui:
-        initialize_gui()
     
+
     # Ask user for number of players and agent types
     print("\nWelcome to Ticket to Ride!")
     
+    if gui_available:
+        use_gui = input("Do you want to use the GUI? (y/n): ").lower() == 'y'
+
     while True:
         try:
             num_players = int(input("How many players? (2-4): "))
@@ -1244,10 +1254,10 @@ def main():
         try:
             map_type = input("Which map would you like to play on? (USA or Europe): ").lower()
             if map_type == "usa":
-                game.map_type = "USA"
+                chosen_map_type = "USA"
                 break
             elif map_type == "europe":
-                game.map_type = "Europe"
+                chosen_map_type = "Europe"
                 break
             else:
                 print("Please enter USA or Europe.")
@@ -1257,18 +1267,24 @@ def main():
     # Define agent options
     agent_options = {
         1: "Human Player (Untested)",
-        2: "MCTS AI",
-        3: "Destination Heuristic AI",
-        4: "Longest Route Heuristic AI",
-        5: "Opportunistic Heuristic AI",
-        6: "Best Move Heuristic AI",
-        7: "Random AI"
+        2: "MCTS Tuned AI",
+        3: "MCTS Untuned AI",
+        4: "Destination Heuristic AI",
+        5: "Longest Route Heuristic AI",
+        6: "Opportunistic Heuristic AI",
+        7: "Best Move Heuristic AI",
+        8: "Random AI"
     }
     
     # Create players array and agent mapping
     players = []
     player_agents = {}  # Maps player name to agent type
     mcts_params = {}    # Store custom MCTS parameters for each player
+
+    # Default MCTS parameters (used if not customized)
+    default_num_sims = 3000
+    default_max_depth = 15
+    
     
     for i in range(num_players):
         print(f"\nPlayer {i+1} options:")
@@ -1286,29 +1302,44 @@ def main():
                 print("Please enter a valid number.")
         
         # If MCTS AI is selected, prompt for parameters
-        if agent_type == 2:
-            # Get number of simulations
+        if agent_type == 2 or agent_type == 3:
             while True:
                 try:
-                    num_sims = int(input(f"Enter number of simulations for MCTS (500-20000, default: 3000)"))
-                    if 500 <= num_sims <= 20000:
+                    customize = input("Do you want to customize MCTS parameters? (y/n): ").lower()
+                    if customize in ['y', 'n']:
+                        if customize == 'y':
+                            # Get number of simulations
+                            while True:
+                                try:
+                                    num_sims = int(input(f"Enter number of simulations for MCTS (500-20000, default: 3000)"))
+                                    if 500 <= num_sims <= 20000:
+                                        break
+                                    else:
+                                        print("Please enter a number between 500 and 20000.")
+                                except ValueError:
+                                    print("Please enter a valid number.")
+                            
+                            # Get max depth
+                            while True:
+                                try:
+                                    max_depth = int(input(f"Enter maximum search depth for MCTS (5-50, default: 15)"))
+                                    if 5 <= max_depth <= 50:
+                                        break
+                                    else:
+                                        print("Please enter a number between 5 and 50.")
+                                except ValueError:
+                                    print("Please enter a valid number.")
+                        else: 
+                            # Use default parameters
+                            num_sims = default_num_sims
+                            max_depth = default_max_depth
+                            print("Using default MCTS parameters (3000 sims, 15 depth).")
                         break
                     else:
-                        print("Please enter a number between 500 and 20000.")
+                        print("Please enter 'y' or 'n'.")
                 except ValueError:
-                    print("Please enter a valid number.")
+                    print("Please enter 'y' or 'n'.")
             
-            # Get max depth
-            while True:
-                try:
-                    max_depth = int(input(f"Enter maximum search depth for MCTS (5-50, default: 15)"))
-                    if 5 <= max_depth <= 50:
-                        break
-                    else:
-                        print("Please enter a number between 5 and 50.")
-                except ValueError:
-                    print("Please enter a valid number.")
-                    
             # Store MCTS parameters for this player
             player_name = f"Player {i+1}"
             mcts_params[player_name] = {
@@ -1324,97 +1355,169 @@ def main():
             destinations=[], 
             claimed_connections=[], 
             points=0, 
-            turn=1
+            turn=1,
+            winner = False,
+            wins = 0
+            
         )
         players.append(player)
         player_agents[player_name] = agent_type  # Store the agent type
     
+    while True:
+        try:
+            num_games = int(input("How many games do you want to play with these settings? (1-100): "))
+            if 1 <= num_games <= 100:
+                break
+            else:
+                print("Please enter a number between 1 and 100.")
+        except ValueError:
+            print("Please enter a valid number.")
+
     print("\n" + "_" * 200 + "\n")
-    # Set up and start the game
-    game.init(players)
-
-    game.player_agents = player_agents
-    game.agent_options = agent_options
-
-    print("You can type back to go to the previous menu option")
-    print("Enjoy Ticket to Ride!")
     
-    # Default MCTS parameters (used if not customized)
-    default_num_sims = 3000
-    default_max_depth = 15
-    
-    # Main game loop
-    while not game.is_end():
-        current_player = game.players[game.current_player_idx]
-        agent_type = player_agents[current_player.name]
-        
-        print(f"\n{current_player.name} ({agent_options[agent_type]}) Turn: {current_player.turn}")
-        tst = time.time()
-        
-        # Handle first turn destination selection
-        if current_player.turn == 1:
-            destinations = game.select_initial_destinations(current_player)
-            game.remove_destination_tickets(current_player, destinations)
-        
-        # Execute agent-specific logic using match-case
-        match agent_type:
-            case 1:  # Human Player (not implemented)
-                player = TicketToRideGame(game)
-                best_action = player.play_turn(current_player)
-            case 2:  # MCTS AI
-                # Get player-specific MCTS parameters or use defaults
-                if current_player.name in mcts_params:
-                    params = mcts_params[current_player.name]
-                    num_sims = params["num_sims"]
-                    max_depth = params["max_depth"]
-                    print(f"Using custom MCTS parameters: {num_sims} simulations, max depth {max_depth}")
-                else:
-                    num_sims = default_num_sims
-                    max_depth = default_max_depth
-                
-                mcts_player = MCTS(game)
-                best_action = mcts_player.best_action(num_sims, max_depth)
-            case 3:  # Destination Heuristic AI
-                heuristic_player = DestinationHeuristic(game)
-                best_action = heuristic_player.choose_action()
-            case 4:  # Longest Route Heuristic AI
-                heuristic_player = LongestRouteHeuristic(game)
-                best_action = heuristic_player.choose_action()
-            case 5:  # Opportunistic Heuristic AI
-                heuristic_player = OpportunisticHeuristic(game)
-                best_action = heuristic_player.choose_action()
-            case 6:  # Best Move Heuristic AI
-                heuristic_player = BestMoveHeuristic(game)
-                best_action = heuristic_player.choose_action()
-            case 7:  # Random AI
-                random_agent = RandomHeuristic(game)
-                best_action = random_agent.choose_action()
+    player_stats = {}  # Store results for player
+    for player in players:
+        player_stats[player.name] = []
+
+    for i in range(num_games):        
+        print(f"\nStarting Game {i+1}...")
+
+        # Reset players
+        for player in players:
+            player.remaining_trains = 45
+            player.train_cards = {color: 0 for color in Color}
+            player.destinations = []
+            player.claimed_connections = []
+            player.claimed_cities = set()
+            player.uf = None
+            player.points = 0
+            player.turn = 1
+            player.winner = False
+
+        # Set up and start the game
+        game = GameState()
+        if gui_available and use_gui:
+            initialize_gui()
+        game.map_type = chosen_map_type
+        game.init(players)
+        game.player_agents = player_agents
+        game.agent_options = agent_options
+
+        # Main game loop
+        while not game.is_end():
+            game.routes_cache_valid = {player.name: False for player in game.players}
             
+            current_player = game.players[game.current_player_idx]
+            agent_type = player_agents[current_player.name]
+            
+            print(f"\n{current_player.name} ({agent_options[agent_type]}) Turn: {current_player.turn}")
+            tst = time.time()
+            
+            # Handle first turn destination selection
+            if current_player.turn == 1:
+                destinations = game.select_initial_destinations(current_player)
+                game.remove_destination_tickets(current_player, destinations)
+            
+            # Execute agent-specific logic using match-case
+            match agent_type:
+                case 1:  # Human Player (untested)
+                    print("You can type back to go to the previous menu option")
+                    player = TicketToRideGame(game)
+                    best_action = player.play_turn(current_player)
+                case 2:  # MCTS AI
+                    # Get player-specific MCTS parameters or use defaults
+                    if current_player.name in mcts_params:
+                        params = mcts_params[current_player.name]
+                        num_sims = params["num_sims"]
+                        max_depth = params["max_depth"]
+                        print(f"Using custom MCTS parameters: {num_sims} simulations, max depth {max_depth}")
+                    else:
+                        num_sims = default_num_sims
+                        max_depth = default_max_depth
+                    
+                    mcts_player = MCTS(game)
+                    best_action = mcts_player.best_action(num_sims, max_depth)
+                case 3:  # MCTS Untuned AI
+                    # Get player-specific MCTS parameters or use defaults
+                    if current_player.name in mcts_params:
+                        params = mcts_params[current_player.name]
+                        num_sims = params["num_sims"]
+                        max_depth = params["max_depth"]
+                        print(f"Using custom MCTS parameters: {num_sims} simulations, max depth {max_depth}")
+                    else:
+                        num_sims = default_num_sims
+                        max_depth = default_max_depth
+                    
+                    mcts_player = MCTS_no_heuristics(game)
+                    best_action = mcts_player.best_action(num_sims, max_depth)
+                case 4:  # Destination Heuristic AI
+                    heuristic_player = DestinationHeuristic(game)
+                    best_action = heuristic_player.choose_action()
+                case 5:  # Longest Route Heuristic AI
+                    heuristic_player = LongestRouteHeuristic(game)
+                    best_action = heuristic_player.choose_action()
+                case 6:  # Opportunistic Heuristic AI
+                    heuristic_player = OpportunisticHeuristic(game)
+                    best_action = heuristic_player.choose_action()
+                case 7:  # Best Move Heuristic AI
+                    heuristic_player = BestMoveHeuristic(game)
+                    best_action = heuristic_player.choose_action()
+                case 8:  # Random AI
+                    random_agent = RandomHeuristic(game)
+                    best_action = random_agent.choose_action()
+                
+            if best_action is None:
+                print(f"{current_player.name} has no valid actions. Ending turn.")
+                pass
+            # Apply the action and update game state
+            game.apply_action_final(best_action)
+            if gui_available and use_gui:
+                update_game_state(game, best_action)
+                #pygame.event.pump()
+            current_player.turn += 1
+            tet = time.time()
+            print(f"Time taken for turn: {tet-tst} seconds")
+            
+            game.update_player_turn()
         
-        # Apply the action and update game state
-        game.apply_action_final(best_action)
-        if use_gui:
-            update_game_state(game, best_action)
-            #pygame.event.pump()
-        current_player.turn += 1
-        tet = time.time()
-        print(f"Time taken for turn: {tet-tst} seconds")
-        
-        game.update_player_turn()
+        # Calculate final scores
+        players_final = game.game_result_final(i+1)
+        # Store results for this game
+        for player in players_final:
+            player_stats[player.name].append(copy.deepcopy(player))
+            
+        timeend = time.time()
+        elapsed_time = timeend - timestart
+        minutes = int(elapsed_time // 60)
+        seconds = int(elapsed_time % 60)
+
+        print(f"Time taken: {minutes} minutes and {seconds} seconds")
+        if gui_available and use_gui:
+            shutdown()
+
+        game.print_owned_routes()
     
-    # Calculate final scores
-    game.game_result_final(1)
+    best_player = None
+    average_scores = {}
+    for i in range(num_games):
+        print(f"\nGame {i+1} Results:")
+        for player_name, player_results in player_stats.items():
+            if i < len(player_results):  # Make sure we have data for this game
+                if average_scores.get(player_name) is None:
+                    average_scores[player_name] = 0
+                average_scores[player_name] += player.points
+                player = player_results[i]
+                print(f"{player_name}: {player.points} points")
+                if player.winner:
+                    print(f"{player_name} wins!")
+                    if best_player is None or best_player.wins < player.wins:
+                        best_player = player
+        
+    for player_name, total_score in average_scores.items():
+        average_scores[player_name] = total_score / num_games
+        print(f"{player_name}: {average_scores[player_name]:.2f} average score")
 
-    timeend = time.time()
-    elapsed_time = timeend - timestart
-    minutes = int(elapsed_time // 60)
-    seconds = int(elapsed_time % 60)
-
-    print(f"Time taken: {minutes} minutes and {seconds} seconds")
-    if use_gui:
-        shutdown()
-
-    game.print_owned_routes()
+    print(f"\nBest player: {best_player.name} with {best_player.wins} wins!")
 
 if __name__ == "__main__":
     main()

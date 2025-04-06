@@ -711,6 +711,10 @@ class MapData:
                 "Paris": [
                     Route(length=1, color=Color.PINK)
                 ],
+                "London": [
+                    Route(length=2, color=Color.GRAY, num_locomotives=1),
+                    Route(length=2, color=Color.GRAY, num_locomotives=1)
+                ],
                 "Brest": [
                     Route(length=2, color=Color.ORANGE)
                 ],

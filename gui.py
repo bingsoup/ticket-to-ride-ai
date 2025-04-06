@@ -48,50 +48,53 @@ class TicketToRideGUI:
 
     # City coordinates for Europe map
     EUROPE_CITY_POSITIONS = {
-        "Edinburgh": (280, 150),
-        "London": (300, 220),
-        "Amsterdam": (380, 220),
-        "Bruxelles": (370, 250),
-        "Paris": (350, 300),
-        "Dieppe": (320, 270),
-        "Brest": (250, 300),
-        "Pamplona": (300, 400),
-        "Madrid": (250, 450),
-        "Lisboa": (180, 470),
-        "Cadiz": (230, 520),
-        "Barcelona": (350, 430),
-        "Marseille": (400, 380),
-        "Zurich": (420, 320),
-        "Frankfurt": (430, 270),
-        "Munchen": (470, 300),
-        "Venezia": (470, 350),
-        "Roma": (470, 410),
-        "Brindisi": (520, 440),
-        "Palermo": (480, 480),
-        "Kobenhavn": (450, 180),
-        "Essen": (430, 230),
-        "Berlin": (480, 230),
-        "Danzic": (530, 200),
-        "Stockholm": (500, 130),
-        "Riga": (570, 170),
-        "Petrograd": (630, 150),
-        "Warszawa": (550, 250),
-        "Wien": (510, 300),
-        "Budapest": (550, 330),
-        "Kyiv": (630, 310),
-        "Wilno": (600, 230),
-        "Smolensk": (650, 230),
-        "Moskva": (700, 200),
-        "Kharkov": (680, 320),
-        "Rostov": (720, 350),
-        "Bucuresti": (600, 370),
-        "Sofia": (580, 400),
-        "Constantinople": (620, 430),
-        "Angora": (680, 450),
-        "Sevastopol": (670, 390),
-        "Erzurum": (750, 430),
-        "Athina": (570, 460),
-        "Smyrna": (620, 470),
+        "Edinburgh": (180, 150),
+        "London": (200, 220),
+        "Amsterdam": (280, 220),
+        "Bruxelles": (270, 250),
+        "Paris": (250, 300),
+        "Dieppe": (220, 270),
+        "Brest": (150, 300),
+        "Pamplona": (200, 400),
+        "Madrid": (150, 450),
+        "Lisboa": (80, 470),
+        "Cadiz": (130, 520),
+        "Barcelona": (250, 430),
+        "Marseille": (300, 380),
+        "Zurich": (320, 320),
+        "Frankfurt": (330, 270),
+        "Munchen": (370, 300),
+        "Venezia": (370, 350),
+        "Roma": (370, 410),
+        "Brindisi": (420, 440),
+        "Palermo": (380, 480),
+        "Kobenhavn": (350, 180),
+        "Essen": (330, 230),
+        "Berlin": (380, 230),
+        "Danzic": (430, 200),
+        "Stockholm": (400, 130),
+        "Riga": (470, 170),
+        "Petrograd": (530, 150),
+        "Warszawa": (450, 250),
+        "Wien": (410, 300),
+        "Budapest": (450, 330),
+        "Kyiv": (530, 310),
+        "Wilno": (500, 230),
+        "Smolensk": (550, 230),
+        "Moskva": (600, 200),
+        "Kharkov": (580, 320),
+        "Rostov": (630, 350),
+        "Bucuresti": (500, 370),
+        "Sofia": (480, 400),
+        "Constantinople": (520, 430),
+        "Angora": (580, 450),
+        "Sevastopol": (570, 390),
+        "Erzurum": (650, 430),
+        "Athina": (470, 460),
+        "Smyrna": (520, 470),
+        "Sarajevo": (460, 380),
+        "Zagrab": (420, 350),
+        "Sochi": (630, 370),
     }
     
     def __init__(self):
@@ -159,7 +162,8 @@ class TicketToRideGUI:
             game_state = {
                 'players': [],
                 'current_player_idx': game.current_player_idx,
-                'connections': []
+                'connections': [],
+                'turn': getattr(game, 'turn', 1)  # Get turn counter, default to 1
             }
             
             # Add action if provided
@@ -184,13 +188,13 @@ class TicketToRideGUI:
                     else:
                         agent_types = {
                             1: "Human Player",
-                            2: "MCTS AI",
-                            3: "Destination Heuristic AI",
-                            4: "Longest Route Heuristic AI",
-                            5: "Opportunistic Heuristic AI", 
-                            6: "Best Move Heuristic AI",
-                            7: "Random AI",
-                            8: "Neural Network AI"
+                            2: "MCTS Tuned AI",
+                            3: "MCTS Untuned AI",
+                            4: "Destination Heuristic AI",
+                            5: "Longest Route Heuristic AI",
+                            6: "Opportunistic Heuristic AI", 
+                            7: "Best Move Heuristic AI",
+                            8: "Random AI"
                         }
                         agent_type = agent_types.get(agent_id, f"Agent {agent_id}")
                 
@@ -265,10 +269,17 @@ class TicketToRideGUI:
             if action_type == "claim_route":
                 return f"{player_name} claimed route: {action[1]} to {action[2]} with {action[3]} cards"
             elif action_type == "draw_two_train_cards":
-                if action[1] == "deck":
-                    return f"{player_name} drew card from deck"
+                card1 = "deck" if action[2] == "deck" else action[2]
+                card2 = "deck" if action[4] == "deck" else action[4]
+                
+                if card1 == "deck" and card2 == "deck":
+                    return f"{player_name} drew 2 cards from deck"
+                elif card1 == "deck":
+                    return f"{player_name} drew 1 card from deck and 1 {card2} card"
+                elif card2 == "deck":
+                    return f"{player_name} drew 1 {card1} card and 1 card from deck"
                 else:
-                    return f"{player_name} drew {action[2]} card from position {action[1]}"
+                    return f"{player_name} drew 1 {card1} card and 1 {card2} card"
             elif action_type == "draw_destination_tickets":
                 kept_count = action[1] + action[2] + action[3]
                 return f"{player_name} drew destination tickets and kept {kept_count}"
@@ -412,22 +423,65 @@ class TicketToRideGUI:
                 if not self.game_state or 'players' not in self.game_state:
                     return
                     
-                # Draw each player's claimed connections
+                # Track which routes have been claimed to handle double routes
+                claimed_routes = {}
+                
+                # First pass: collect all claimed routes by all players
                 for i, player in enumerate(self.game_state['players']):
-                    color = self.parent.PLAYER_COLORS[i % len(self.parent.PLAYER_COLORS)]
                     if 'claimed_connections' in player:
                         for connection in player['claimed_connections']:
                             if len(connection) >= 2:
                                 city1, city2 = connection[0], connection[1]
-                                if city1 in self.parent.city_positions and city2 in self.parent.city_positions:
-                                    pos1 = self.parent.city_positions[city1]
-                                    pos2 = self.parent.city_positions[city2]
-                                    pygame.draw.line(self.parent.screen, color, pos1, pos2, 4)
-                                    
-                                    # Draw a small circle in the middle of the line
-                                    mid_x = (pos1[0] + pos2[0]) // 2
-                                    mid_y = (pos1[1] + pos2[1]) // 2
-                                    pygame.draw.circle(self.parent.screen, color, (mid_x, mid_y), 5)
+                                # Use a canonical order for the cities to avoid duplicates
+                                route_key = tuple(sorted([city1, city2]))
+                                
+                                if route_key not in claimed_routes:
+                                    claimed_routes[route_key] = []
+                                claimed_routes[route_key].append(i)  # Store player index
+                
+                # Second pass: draw all routes with appropriate offsets
+                for route_key, player_indices in claimed_routes.items():
+                    city1, city2 = route_key
+                    
+                    if city1 in self.parent.city_positions and city2 in self.parent.city_positions:
+                        pos1 = self.parent.city_positions[city1]
+                        pos2 = self.parent.city_positions[city2]
+                        
+                        # Calculate direction vector and perpendicular vector for offsets
+                        dx = pos2[0] - pos1[0]
+                        dy = pos2[1] - pos1[1]
+                        length = max(1, (dx**2 + dy**2)**0.5)  # Avoid division by zero
+                        
+                        # Normalized perpendicular vector
+                        nx = -dy / length
+                        ny = dx / length
+                        
+                        # Draw each player's claim with appropriate offset
+                        for idx, player_idx in enumerate(player_indices):
+                            color = self.parent.PLAYER_COLORS[player_idx % len(self.parent.PLAYER_COLORS)]
+                            
+                            # Calculate offset based on number of claims
+                            if len(player_indices) == 1:
+                                offset = 0  # No offset for single claim
+                            else:
+                                # For double routes, offset in opposite directions
+                                offset = 4 if idx == 0 else -4
+                            
+                            # Apply offset to create parallel lines
+                            pos1_offset = (int(pos1[0] + nx * offset), int(pos1[1] + ny * offset))
+                            pos2_offset = (int(pos2[0] + nx * offset), int(pos2[1] + ny * offset))
+                            
+                            # Draw the route line with reduced thickness
+                            pygame.draw.line(self.parent.screen, color, pos1_offset, pos2_offset, 2)
+                            
+                            # Draw small circles at each endpoint to make connections more visible
+                            pygame.draw.circle(self.parent.screen, color, pos1_offset, 3)
+                            pygame.draw.circle(self.parent.screen, color, pos2_offset, 3)
+                            
+                            # Draw a small circle in the middle for additional visibility
+                            mid_x = (pos1_offset[0] + pos2_offset[0]) // 2
+                            mid_y = (pos1_offset[1] + pos2_offset[1]) // 2
+                            pygame.draw.circle(self.parent.screen, color, (mid_x, mid_y), 3)
             except Exception as e:
                 print(f"Error drawing player routes: {e}")
         
@@ -488,17 +542,9 @@ class TicketToRideGUI:
             self.parent.screen.blit(dest_text, (panel_x + 150, panel_y + 70))
         
         def _draw_action(self):
-            """Draw the most recent action"""
+            """Draw the most recent action and turn counter"""
             try:
-                if not self.game_state or 'action' not in self.game_state:
-                    return
-                    
-                # Add action to log
-                self.parent.action_log.append(self.game_state['action'])
-                if len(self.parent.action_log) > 10:
-                    self.parent.action_log.pop(0)
-                
-                # Draw action log panel
+                # Action panel
                 panel_x = 50
                 panel_y = 580
                 panel_width = 700
@@ -506,9 +552,17 @@ class TicketToRideGUI:
                 
                 pygame.draw.rect(self.parent.screen, (255, 255, 255), 
                                (panel_x, panel_y, panel_width, panel_height))
-                               
-                title_text = self.parent.font.render("Recent Actions:", True, self.parent.TEXT_COLOR)
+                
+                # Draw turn counter
+                turn = self.game_state.get('turn', 1)
+                title_text = self.parent.font.render(f"Turn {turn} - Recent Actions:", True, self.parent.TEXT_COLOR)
                 self.parent.screen.blit(title_text, (panel_x + 10, panel_y + 10))
+                
+                # Add and display action log if there's a new action
+                if 'action' in self.game_state:
+                    self.parent.action_log.append(self.game_state['action'])
+                    if len(self.parent.action_log) > 10:
+                        self.parent.action_log.pop(0)
                 
                 # Draw action log entries
                 for i, log_entry in enumerate(reversed(self.parent.action_log)):
