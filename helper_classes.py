@@ -18,15 +18,6 @@ class UnionFind:
             
         # Standard Union-Find parent array for tracking components
         self.parent = list(range(self.n))
-
-    def find(self, city):
-        # Convert city to index
-        idx = self.city_to_idx[city]
-        
-        # Find root with path compression (used only during union operations)
-        if self.parent[idx] != idx:
-            self.parent[idx] = self.find_idx(self.parent[idx])
-        return self.parent[idx]
     
     def find_idx(self, idx):
         # Internal version that works with indices directly
@@ -81,27 +72,27 @@ class Destination:
     city2: str
     points: int
 
-# Color enum for train cards
-class Color(Enum):
-    RED = "red"
-    BLUE = "blue"
-    GREEN = "green"
-    YELLOW = "yellow"
-    BLACK = "black"
-    ORANGE = "orange"
-    WHITE = "white"
-    PINK = "pink"
-    GRAY = "gray"
-    WILD = "wild"
-
+# Colour enum for train cards
+class Colour(Enum):
+    RED = "Red"
+    BLUE = "Blue"
+    GREEN = "Green"
+    YELLOW = "Yellow"
+    BLACK = "Black"
+    ORANGE = "Orange"
+    WHITE = "White"
+    PINK = "Pink"
+    GRAY = "Gray"
+    WILD = "Wild"    
+   
 # Player class to store player information
 @dataclass
 class Player:
     name: str
     remaining_trains: int = 45
-    train_cards: Dict[Color, int] = None
+    train_cards: Dict[Colour, int] = None
     destinations: List[Destination] = None
-    claimed_connections: List[Tuple[str, str, Color]] = None
+    claimed_connections: List[Tuple[str, str, Colour]] = None
     claimed_cities: Set[str] = None
     points: int = 0
     turn: int = 1
@@ -111,7 +102,7 @@ class Player:
     
     def __post_init__(self):
         if self.train_cards is None:
-            self.train_cards = {color: 0 for color in Color}
+            self.train_cards = {colour: 0 for colour in Colour}
         if self.destinations is None:
             self.destinations = []
         if self.claimed_connections is None:
@@ -119,8 +110,8 @@ class Player:
         if self.claimed_cities is None:
             self.claimed_cities = set()
         
-    def getTrainCards(self) -> List[Tuple[Color, int]]:
-        return [(color, count) for color, count in self.train_cards.items() if count > 0]
+    def getTrainCards(self) -> List[Tuple[Colour, int]]:
+        return [(colour, count) for colour, count in self.train_cards.items() if count > 0]
     
     def getClaimedCity(self,city: str) -> bool:
         return city in self.claimed_cities
@@ -128,7 +119,7 @@ class Player:
 @dataclass
 class Route:
     length: int
-    color: Color
+    colour: Colour
     claimed_by: str = None
     tunnel: bool = False
     num_locomotives: int = 0
@@ -138,5 +129,3 @@ class Route:
 
     def is_claimed(self) -> bool:
         return self.claimed_by is not None
-    
-

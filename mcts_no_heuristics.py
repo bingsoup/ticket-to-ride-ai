@@ -1,5 +1,6 @@
 import math
 import random
+from console import LiveConsole, is_pypy
 #from graph import visualize_mcts_tree as viz_mcts
 
 class MCTSNode:
@@ -106,18 +107,54 @@ class MCTSNode:
             self.parent.backpropagate(result)
 
 class MCTS:
-    def __init__(self, game_state, update_queue=None):
+    def __init__(self, game_state):
         self.root = MCTSNode(game_state)
-        self.update_queue = update_queue
-    
+        self.console = None if is_pypy else LiveConsole()
+
     def best_action(self, simulations_number, max_depth):
-        for sim_num in range(simulations_number):
-            v = self.tree_policy()
-            state = v.rollout(max_depth)
-            player = state.players[state.current_player_idx]
-            reward = state.game_result(sim_num)
-            v.backpropagate(reward)
-        return self.root.best_child().action
+        if self.console and not is_pypy:
+            self.console.start_live(simulations_number)
+
+        try:
+            for sim_num in range(simulations_number):
+                v = self.tree_policy()
+                state = v.rollout(max_depth)
+                player = state.players[state.current_player_idx]
+                reward = state.game_result(sim_num)
+                v.backpropagate(reward)
+                
+                # Update the console display every 10 simulations to avoid slowdown
+                if self.console and sim_num % 10 == 0 and not is_pypy:
+                    # Collect player information
+                    player_info = {
+                        'name': player.name,
+                        'points': reward  # Use the calculated reward as points
+                    }
+                    self.console.update_display(sim_num, player_info)
+                    
+            # Show when its complete
+            if self.console and not is_pypy:
+                player = self.root.state.current_player
+                self.console.update_display(simulations_number, {'name': player.name, 'points': player.points})
+                self.console.stop()
+                
+             # Visualize the tree
+            """
+            viz_mcts(self.root, max_depth=4, 
+                        filename=f"mcts_tree_turn_{self.root.state.current_player.turn}.png")
+            """
+            # Return best action
+            return self.root.best_child().action
+            
+        except Exception as e:
+            print(f"Error in MCTS simulation: {e}")
+            # Stop if theres an error
+            if self.console and not is_pypy:
+                self.console.stop()
+            # Return a valid action if possible
+            if self.root.children:
+                return self.root.best_child().action
+            return None
     
     def tree_policy(self):
         current_node = self.root

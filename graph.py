@@ -24,7 +24,7 @@ def visualize_mcts_tree(root, max_depth=3, max_children_per_node=4, filename="mc
     value = root.value / root.visits if root.visits > 0 else 0.0
     G.add_node(id(root), 
                label=f"Root\nVisits: {root.visits}\nValue: {value:.2f}",
-               color='lightblue')
+               colour='lightblue')
     
     # Process nodes in breadth-first order
     nodes_to_process = [(root, 0)]  # (node, depth)
@@ -62,28 +62,28 @@ def visualize_mcts_tree(root, max_depth=3, max_children_per_node=4, filename="mc
             else:
                 action_label = "No action"
                 
-            # Calculate node color based on value/visits ratio (exploitation value)
+            # Calculate node colour based on value/visits ratio (exploitation value)
             if child.visits > 0:
-                # Use named colors instead of RGB tuples
+                # Use named colours instead of RGB tuples
                 value_ratio = min(1.0, max(0.0, child.value / max(1, child.visits)))
                 if value_ratio > 0.8:
-                    color = 'red'
+                    colour = 'red'
                 elif value_ratio > 0.6:
-                    color = 'salmon'
+                    colour = 'salmon'
                 elif value_ratio > 0.4:
-                    color = 'lightcoral'
+                    colour = 'lightcoral'
                 elif value_ratio > 0.2:
-                    color = 'mistyrose'
+                    colour = 'mistyrose'
                 else:
-                    color = 'white'
+                    colour = 'white'
             else:
-                color = 'white'
+                colour = 'white'
                 
             child_value = child.value / child.visits if child.visits > 0 else 0.0
             # Add node and edge
             G.add_node(id(child),
                       label=f"Visits: {child.visits}\nValue: {child_value:.2f}",
-                      color=color)
+                      colour=colour)
             G.add_edge(id(node), id(child), 
                       label=action_label)
             
@@ -94,9 +94,9 @@ def visualize_mcts_tree(root, max_depth=3, max_children_per_node=4, filename="mc
     plt.figure(figsize=(16, 10))
     pos = nx.nx_agraph.graphviz_layout(G, prog='dot')
     
-    # Draw nodes with colors
-    node_colors = [G.nodes[n].get('color', 'lightblue') for n in G.nodes]
-    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color=node_colors, alpha=0.8)
+    # Draw nodes with colours
+    node_colours = [G.nodes[n].get('colour', 'lightblue') for n in G.nodes]
+    nx.draw_networkx_nodes(G, pos, node_size=2000, node_colour=node_colours, alpha=0.8)
     
     # Draw edges
     nx.draw_networkx_edges(G, pos, arrowsize=20)
@@ -133,16 +133,16 @@ class TicketToRideVisualizer:
             for city2, routes in connections.items():
                 for route in routes:
                     cb = route.claimed_by if route.claimed_by else 'Unclaimed'
-                    G.add_edge(city1, city2, color=route.color.value, length=route.length, claimed_by=cb)
+                    G.add_edge(city1, city2, colour=route.colour.value, length=route.length, claimed_by=cb)
 
         # Customize node and edge appearance
         pos = nx.kamada_kawai_layout(G)
-        node_color = ["lightblue"] * len(G.nodes)
-        edge_colors = [edge_attr["color"] for u,v,edge_attr in G.edges(data=True)]
+        node_colour = ["lightblue"] * len(G.nodes)
+        edge_colours = [edge_attr["colour"] for u,v,edge_attr in G.edges(data=True)]
 
         # Draw the graph
         fig, ax = plt.subplots(figsize=(12, 8))
-        nx.draw(G, pos, with_labels=True, node_color=node_color, edge_color=edge_colors, ax=ax, node_size=500, font_size=8)
+        nx.draw(G, pos, with_labels=True, node_colour=node_colour, edge_colour=edge_colours, ax=ax, node_size=500, font_size=8)
 
         # Add edge labels
         edge_labels = {(u, v): f"{edge_attr['length'], edge_attr['claimed_by']}" for u, v, edge_attr in G.edges(data=True)}

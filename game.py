@@ -4,30 +4,34 @@ from typing import List, Optional,Tuple
 import random
 from mcts import MCTS
 from mcts_no_heuristics import MCTS as MCTS_no_heuristics
-#from console import LiveConsole
 #from graph import TicketToRideVisualizer
 from fw import FloydWarshall
 from map_data import MapData
-from helper_classes import UnionFind, Destination, Player, Color, Route, UnionFind
-from heuristic_agents import DestinationHeuristic, LongestRouteHeuristic, OpportunisticHeuristic, RandomHeuristic, BestMoveHeuristic
+from helper_classes import UnionFind, Destination, Player, Colour, Route, UnionFind
+from heuristic_agents import DestinationHeuristic, LongestRouteHeuristic, OpportunisticHeuristic, RandomHeuristic, BestMoveHeuristic, ShaoHeuristic
 from play import TicketToRideGame
 import platform
-is_pypy = platform.python_implementation() == 'PyPy'
+is_pypy = False
+
 # Only import GUI modules if not running under PyPy
+is_pypy = platform.python_implementation() == 'PyPy'
+
+# Only import GUI modules if not running under PyPy or Nuitka standalone mode
 if not is_pypy:
     try:
-        from gui import initialize_gui, update_game_state, shutdown
+        from gui import initialise_gui, update_game_state, shutdown
         gui_available = True
     except ImportError:
         gui_available = False
         print("GUI modules couldn't be imported. Running in console-only mode.")
 else:
-    # Create dummy functions for GUI operations when running under PyPy
+    # Dummy functions for PyPy
     gui_available = False
-    def initialize_gui(): return False
+    def initialise_gui(): return False
     def update_game_state(game, action=None): pass
     def shutdown(): pass
     print("Running under PyPy - GUI disabled for compatibility.")
+
 # Handles the game state, including the board, players, current player index, score, train deck, destination deck, and face-up cards
 class GameState:
     def __init__(self):
@@ -35,11 +39,11 @@ class GameState:
         self.players: List[Player] = [] # List of players
         self.current_player_idx: int = 0 # Index of the current player
         self.current_player: Player = None # Reference to the current player
-        self.train_deck: List[Color] = [] # Train deck
-        self.discard_deck: List[Color] = [] # Discard deck
+        self.train_deck: List[Colour] = [] # Train deck
+        self.discard_deck: List[Colour] = [] # Discard deck
         self.destination_deck: List[Destination] = []  # Destination ticket deck
         self.destination_discard_deck: List[Destination] = []  # Discard deck for destination tickets
-        self.face_up_cards: List[Color] = [] # Face-up cards
+        self.face_up_cards: List[Colour] = [] # Face-up cards
         #self.visualizer = TicketToRideVisualizer(self) # Displays the board state in image form
         self.fw = None # Floyd-Warshall object for shortest path calculations
         self.update = None # Update queue for visualizer
@@ -60,24 +64,21 @@ class GameState:
         self.initialise_routes()
         
         self.fw = FloydWarshall(self.routes)
-        # Add 12 of each color (excluding wild) and 14 wild cards
+        # Add 12 of each colour (excluding wild) and 14 wild cards
         self.setup_train_deck()
         self.deal_initial_cards()
         # Draw initial face-up cards
         self.face_up_cards = [self.train_deck.pop() for _ in range(5)]
         self.current_player = self.players[self.current_player_idx]
-
+        # Initialise union-find
         self.init_uf()
     
     def formatted_trains(self, player: Player) -> List[str]: 
-        return [f"{color.name.capitalize()}: {count}" for color, count in player.train_cards.items() if count > 0]
+        return [f"{colour.value}: {count}" for colour, count in player.train_cards.items() if count > 0]
 
     def formatted_destinations(self, player: Player) -> List[str]: 
         return [f"{destination.city1} to {destination.city2} ({destination.points})" for destination in player.destinations]
     
-    def formatted_colors(self, colors: List[Color]) -> List[str]:
-        return [color.name.capitalize() for color in colors]
-
     def deal_initial_cards(self):
         for player in self.players:
             # Deal 4 train cards to each player
@@ -86,7 +87,6 @@ class GameState:
                 player.train_cards[card] += 1
             # Deal 3 destination cards, player must keep at least 2
             destinations = [self.destination_deck.pop() for _ in range(3)]
-            # TODO - player must keep at least 2 & can discard 1
             player.destinations.extend(destinations[:3])
                     
             print(f"{player.name} has been dealt the following destinations: {', '.join(self.formatted_destinations(player))}")
@@ -148,7 +148,7 @@ class GameState:
         # Create adjacency matrix for faster lookups
         n = len(self.city_names)
         self.adjacency = [[[] for _ in range(n)] for _ in range(n)]
-        
+        # Populate AM
         for city1, connections in self.routes.items():
             i = self.city_to_idx[city1]
             for city2, routes_list in connections.items():
@@ -245,7 +245,7 @@ class GameState:
 
         Returns:
             List of actions where each action is a tuple:
-            ("claim_route", city1, city2, color, player)
+            ("claim_route", city1, city2, colour, player)
         """
         current_player = self.current_player
         cache_key = current_player.name
@@ -263,37 +263,56 @@ class GameState:
             for j in range(i+1, n):  
                 city2 = self.idx_to_city[j]
                 routes_list = self.adjacency[i][j]
+
+                # Skip if this is a double route and the player already owns one of the routes
+                is_double_route = len(routes_list) > 1
+                if is_double_route:
+                    player_owns_route = False
+                    # If it's only two players, do not allow double route claiming
+                    for player in self.players:
+                        for conn in player.claimed_connections:
+                            conn_city1, conn_city2 = conn[0], conn[1]
+                            if (conn_city1 == city1 and conn_city2 == city2) or (conn_city1 == city2 and conn_city2 == city1):
+                                if len(self.players) == 2:
+                                    player_owns_route = True
+                                    break
+                                elif player.name == current_player.name:
+                                    player_owns_route = True
+                                    break       
+                    if player_owns_route:
+                        continue  # Skip all routes between these cities if player already owns one
+                
                 for route in routes_list:
                     if route.claimed_by is None:
                         if current_player.remaining_trains > route.length:
-                            # For gray routes, check each color
-                            if route.color == Color.GRAY:
-                                for color in Color:
-                                    if color != Color.WILD and color != Color.GRAY:
+                            # For gray routes, check each colour
+                            if route.colour == Colour.GRAY:
+                                for colour in Colour:
+                                    if colour != Colour.WILD and colour != Colour.GRAY:
                                         cards_needed = route.length
-                                        cards_available = current_player.train_cards[color]
-                                        wilds_available = current_player.train_cards[Color.WILD]
+                                        cards_available = current_player.train_cards[colour]
+                                        wilds_available = current_player.train_cards[Colour.WILD]
                                         wilds_required = route.num_locomotives
-                                        wilds_needed = max(wilds_required,(route.length - current_player.train_cards[color]))
+                                        wilds_needed = max(wilds_required,(route.length - current_player.train_cards[colour]))
                                         
                                         if cards_available + wilds_available >= cards_needed + wilds_required:
                                             for wilds_used in range(wilds_needed,wilds_available + 1):
                                                 wilds_used - 1
                                                 route_actions.append(
-                                                    ("claim_route", city1, city2, color, wilds_used, route, current_player.name)
+                                                    ("claim_route", city1, city2, colour, wilds_used, route, current_player.name)
                                                 )
                             else:
-                                # For colored routes
-                                color = route.color  
+                                # For coloured routes
+                                colour = route.colour  
                                 cards_needed = route.length
-                                cards_available = current_player.train_cards[color]
-                                wilds_available = current_player.train_cards[Color.WILD]
-                                wilds_needed = max(0,(route.length - current_player.train_cards[color]))
+                                cards_available = current_player.train_cards[colour]
+                                wilds_available = current_player.train_cards[Colour.WILD]
+                                wilds_needed = max(0,(route.length - current_player.train_cards[colour]))
                                 if cards_available + wilds_available >= cards_needed:
                                     for wilds_used in range(wilds_needed,wilds_available + 1):
                                         wilds_used - 1
                                         route_actions.append(
-                                            ("claim_route", city1, city2, color, wilds_used, route, current_player.name)
+                                            ("claim_route", city1, city2, colour, wilds_used, route, current_player.name)
                                         )
         
         # Store in cache
@@ -311,13 +330,13 @@ class GameState:
             self.unclaimed_routes_cache = [(a, b, r) for a, b, r in self.unclaimed_routes_cache 
                                         if not ((a == i and b == j) or (a == j and b == i))]
     
-    def claim_route_helper(self, color: Color, player: str, num_hits: int, routes) -> bool:
+    def claim_route_helper(self, colour: Colour, player: str, num_hits: int, routes) -> bool:
         """Claims the route if possible, otherwise returns False."""
         claimed = [False] * len(routes)
         for i, route in enumerate(routes):
             claimed[i] = route.is_claimed()
-            if (color == Color.WILD or route.color == color or route.color == Color.GRAY) and not claimed[i]:
-                if self.current_player.train_cards[color] + self.current_player.train_cards[Color.WILD] >= route.length + num_hits:
+            if (colour == Colour.WILD or route.colour == colour or route.colour == Colour.GRAY) and not claimed[i]:
+                if self.current_player.train_cards[colour] + self.current_player.train_cards[Colour.WILD] >= route.length + num_hits:
                     # Update route state
                     route.claim(player)
                     # Invalidate cache when route is claimed
@@ -332,7 +351,7 @@ class GameState:
             return False
         return True
     
-    def claim_route(self, city1: str, city2: str, color: Color, player: str, num_hits: int) -> bool:
+    def claim_route(self, city1: str, city2: str, colour: Colour, player: str, num_hits: int) -> bool:
         """
         Checks whether any of the routes between cities with a given can be claimed
         I have to to do it like this because you can have multiple gray routes between two cities
@@ -340,31 +359,48 @@ class GameState:
         Args:
             city1: First city
             city2: Second city
-            color: Color of the route
+            colour: Colour of the route
             player: Player claiming the route
             num_hits: Precomputed number of hits for tunnel routes
         """
         routes = self.route_lookup(city1, city2)
         if len(routes) == 4:
             path1 = [routes[0],routes[2]]
-            p1 = self.claim_route_helper(color, player, num_hits, path1)
+            p1 = self.claim_route_helper(colour, player, num_hits, path1)
             if p1: return True
             path2 = [routes[1], routes[3]]
-            p2 = self.claim_route_helper(color, player, num_hits, path2)
+            p2 = self.claim_route_helper(colour, player, num_hits, path2)
             if p2: return True
             return False
         else: # Only one direction so can claim both
-            if self.claim_route_helper(color, player, num_hits, routes): return True
+            if self.claim_route_helper(colour, player, num_hits, routes): return True
         return False
 
-    def check_hits(self, route: Route, color) -> bool:
-        """Checks if the player can still claim it if tunnel hits"""
+    def check_hits(self, route: Route, colour) -> int:
+        """Checks how many additional cards are needed for a tunnel route."""
         num_hits = 0
-        if route.tunnel:
-            if len(self.train_deck) > 3:
-                for i in range(3):
-                    if self.train_deck[i] == Color.WILD or self.train_deck[i] == color:
-                        num_hits += 1
+        
+        # Only check tunnel routes
+        if not route.tunnel:
+            return num_hits
+        
+        # Ensure we have enough cards to check
+        if len(self.train_deck) < 3 and self.discard_deck:
+            self.train_deck.extend(self.discard_deck)
+            self.discard_deck.clear()
+            random.shuffle(self.train_deck)
+        
+        # Draw up to 3 cards and check for matches
+        drawn_cards = []
+        for _ in range(min(3, len(self.train_deck))):
+            card = self.train_deck.pop()
+            drawn_cards.append(card)
+            if card == Colour.WILD or card == colour:
+                num_hits += 1
+        
+        # Move the drawn cards to the discard pile
+        self.discard_deck.extend(drawn_cards)
+        
         return num_hits
         
     def get_route_length(self, city1: str, city2: str) -> Optional[int]:
@@ -373,13 +409,13 @@ class GameState:
         return routes[0].length
     
     def setup_train_deck(self):
-        for color in Color:
-            if color != Color.WILD and color != Color.GRAY:
-                self.train_deck.extend([color] * 12)
-        self.train_deck.extend([Color.WILD] * 14)
+        for colour in Colour:
+            if colour != Colour.WILD and colour != Colour.GRAY:
+                self.train_deck.extend([colour] * 12)
+        self.train_deck.extend([Colour.WILD] * 14)
         random.shuffle(self.train_deck)
 
-    def draw_train_face(self, i: int, card: Color):
+    def draw_train_face(self, i: int, card: Colour):
         """Draw a face-up card."""
         if len(self.train_deck) == 0:
             if len(self.discard_deck) == 0:
@@ -434,9 +470,9 @@ class GameState:
             num_trains = 45 - player.remaining_trains
             used_trains = 0
             print(f"{player.name} has claimed the following routes:")
-            for city1, city2, color in player.claimed_connections:
+            for city1, city2, colour in player.claimed_connections:
                 used_trains += self.get_route_length(city1, city2)
-                print(f"{city1} to {city2} with {color} and length {self.get_route_length(city1, city2)}")
+                print(f"{city1} to {city2} with {colour.value} and length {self.get_route_length(city1, city2)}")
             
             if used_trains != num_trains:
                 print(f"Bug occurred, printing entire route list:")
@@ -444,7 +480,7 @@ class GameState:
                     for city2 in city1:
                         for route in city2:
                             if route.claimed_by == player.name:
-                                print(f"{city1} to {city2} with {route.color} and length {route.length}")
+                                print(f"{city1} to {city2} with {route.colour.value} and length {route.length}")
                     
 
     # MCTS methods
@@ -477,7 +513,7 @@ class GameState:
         if hasattr(self, 'route_pairs'):
             new_state.route_pairs = {}
             for key, routes in self.route_pairs.items():
-                new_state.route_pairs[key] = [Route(r.length, r.color, r.claimed_by) for r in routes]
+                new_state.route_pairs[key] = [Route(r.length, r.colour, r.claimed_by) for r in routes]
         
         # Efficiently copy adjacency matrix if it exists
         if hasattr(self, 'adjacency') and self.adjacency:
@@ -486,7 +522,7 @@ class GameState:
             for i in range(n):
                 for j in range(n):
                     if self.adjacency[i][j]:  # Only copy non-empty lists
-                        new_state.adjacency[i][j] = [Route(r.length, r.color, r.claimed_by) for r in self.adjacency[i][j]]
+                        new_state.adjacency[i][j] = [Route(r.length, r.colour, r.claimed_by) for r in self.adjacency[i][j]]
         
         # Copy caches over
         new_state.routes_cache = self.routes_cache.copy() if self.routes_cache else {}
@@ -507,7 +543,7 @@ class GameState:
             new_player = Player(name=player.name, remaining_trains=player.remaining_trains)
             
             # Copy collections
-            new_player.train_cards = {color: count for color, count in player.train_cards.items()}
+            new_player.train_cards = {colour: count for colour, count in player.train_cards.items()}
             new_player.destinations = player.destinations.copy() if player.destinations else []
             new_player.claimed_connections = player.claimed_connections.copy() if player.claimed_connections else []
             new_player.claimed_cities = set(player.claimed_cities) if player.claimed_cities else set()
@@ -516,8 +552,11 @@ class GameState:
             new_player.turn = player.turn
             
             # Recreate UnionFind instead of copying it
-            
-            new_player.uf = UnionFind(self.city_names)
+            if player.uf:
+                new_player.uf = UnionFind(self.city_names)
+                # Only rebuild connections that matter
+                for city1, city2, _ in player.claimed_connections:
+                    new_player.uf.union(city1, city2)
 
             new_state.players.append(new_player)
         
@@ -538,19 +577,19 @@ class GameState:
                         self.draw_train_face(idx2, card2)
                     else:
                         self.draw_train_deck()
-            case ["claim_route", city1, city2, color, wilds_used, route, player_name]:    
-                num_hits = self.check_hits(route, color)                    
-                if self.claim_route(city1, city2, color, player_name, num_hits):
+            case ["claim_route", city1, city2, colour, wilds_used, route, player_name]:    
+                num_hits = self.check_hits(route, colour)                    
+                if self.claim_route(city1, city2, colour, player_name, num_hits):
                     route_length = self.get_route_length(city1, city2)
                     total_length = (route_length + num_hits)
 
                     # Calculate the minimum number of wilds the player now has to use to complete the route
                     # Or return False if not possible because of too many tunnel hits.
                     if num_hits > 0:
-                        if total_length > player.train_cards[color]:
-                            wilds_used += total_length - player.train_cards[color]
-                            if wilds_used > player.train_cards[Color.WILD]:
-                                if wilds_used > player.train_cards[Color.WILD]:
+                        if total_length > player.train_cards[colour]:
+                            wilds_used += total_length - player.train_cards[colour]
+                            if wilds_used > player.train_cards[Colour.WILD]:
+                                if wilds_used > player.train_cards[Colour.WILD]:
                                     return False
                                 
                     # If the route is in the best routes cache, invalidate it
@@ -559,11 +598,11 @@ class GameState:
                             if (self.best_routes_cache[player.name][i][1] == (city1 or city2) and self.best_routes_cache[player.name][i][2] == (city1 or city2)):
                                 self.best_routes_cache_valid[player.name] = False
 
-                    player.train_cards[Color.WILD] -= wilds_used
-                    player.train_cards[color] -= max(0, total_length - wilds_used)
-                    self.discard_deck.extend([Color.WILD] * wilds_used)
-                    self.discard_deck.extend([color] * (total_length - wilds_used))
-                    player.claimed_connections.append((city1, city2, color))
+                    player.train_cards[Colour.WILD] -= wilds_used
+                    player.train_cards[colour] -= max(0, total_length - wilds_used)
+                    self.discard_deck.extend([Colour.WILD] * wilds_used)
+                    self.discard_deck.extend([colour] * (total_length - wilds_used))
+                    player.claimed_connections.append((city1, city2, colour))
                     player.claimed_cities.add(city1)
                     player.claimed_cities.add(city2)
                     points = self.calc_route_points(route_length)
@@ -605,25 +644,25 @@ class GameState:
         success = self.apply_action(action)
 
         print(f"{self.current_player.name}'s hand:")
-        for color, count in self.current_player.train_cards.items():
+        for colour, count in self.current_player.train_cards.items():
             if count > 0:
-                print(f"{color.name.capitalize()}: {count}")
+                print(f"{colour.value}: {count}")
         match action:
             case ["draw_two_train_cards", idx1, card1, idx2, card2, player_name]:
                 print(f"{player_name} has drawn two train cards: {card1}, {card2}")
             
-            case ["claim_route", city1, city2, color, wilds_used, route, player_name]:
+            case ["claim_route", city1, city2, colour, wilds_used, route, player_name]:
                 route_length = self.get_route_length(city1, city2)
-                num_hits = self.check_hits(route, color)
+                num_hits = self.check_hits(route, colour)
                 if success:
                     if num_hits > 0:
-                        print(f"{player_name} has claimed a route of length {route_length} between {city1} and {city2} with {color} using {wilds_used} wild cards and {num_hits} hits")
+                        print(f"{player_name} has claimed a route of length {route_length} between {city1} and {city2} with {colour.value} using {wilds_used} wild cards and {num_hits} hits")
                     elif wilds_used > 0:
-                        print(f"{player_name} has claimed a route of length {route_length} between {city1} and {city2} with {color} using {wilds_used} wild cards")
+                        print(f"{player_name} has claimed a route of length {route_length} between {city1} and {city2} with {colour.value} using {wilds_used} wild cards")
                     else:
-                        print(f"{player_name} has claimed a route of length {route_length} between {city1} and {city2} with {color}")
+                        print(f"{player_name} has claimed a route of length {route_length} between {city1} and {city2} with {colour.value}")
                 else:
-                    print(f"{player_name} got too many hits between {city1} and {city2} with {color}")
+                    print(f"{player_name} got too many hits between {city1} and {city2} with {colour.value}")
                 
             case ["draw_destination_tickets", i, j, k, player_name]:
                 ijk = sum([i,j,k])
@@ -653,12 +692,12 @@ class GameState:
         # Draw two train cards. Enumerate all possible combinations of face-up cards and deck cards
         if len(self.train_deck) + len(self.discard_deck) > 10: # Dont hog cards
             for i, card1 in enumerate(self.face_up_cards):
-                if card1 != Color.WILD:
+                if card1 != Colour.WILD:
                     for j, card2 in enumerate(self.face_up_cards):
                         if j == i:
                             if len(self.train_deck) > 0:
                                 card2 = self.train_deck[0]
-                        if card2 != Color.WILD:
+                        if card2 != Colour.WILD:
                             legal_actions.append(("draw_two_train_cards", i, card1, j, card2, current_player.name))
                     legal_actions.append(("draw_two_train_cards", i, card1, "deck", "deck", current_player.name))
                 else:
@@ -818,6 +857,7 @@ class GameState:
         
         Args:
             route_actions: List of claim_route actions
+            consider_distance_reduction: If True, also consider routes that reduce distance to destinations
             
         Returns:
             A claim_route action that helps complete a destination ticket,
@@ -829,80 +869,50 @@ class GameState:
         player = self.current_player
         beneficial_actions = []
         
-        # Group destination tickets by cities for faster lookup
-        city_to_dest = {}
-        for i, dest in enumerate(player.destinations):
-            if dest.city1 not in city_to_dest:
-                city_to_dest[dest.city1] = []
-            if dest.city2 not in city_to_dest:
-                city_to_dest[dest.city2] = []
-            # Store index instead of Destination object
-            city_to_dest[dest.city1].append(i)
-            city_to_dest[dest.city2].append(i)
         
-        # Check if claiming a route directly completes a destination
         for action in route_actions:
             city1, city2 = action[1], action[2]
-            color = action[3]
+            colour = action[3]
             wilds_used = action[4]
             route = action[5]
             score = 0
 
             # Calculate card penalty (100 points per card needed)
             route_length = route.length
-            cards_available = player.train_cards[color]
-            cards_needed = max(0, route_length - cards_available - player.train_cards[Color.WILD])
+            cards_available = player.train_cards[colour]
+            cards_needed = max(0, route_length - cards_available - player.train_cards[Colour.WILD])
             card_penalty = cards_needed * 100
             
-            # Check if this route directly connects the endpoints of a destination
+            # Step 1: Check if claiming a route directly completes a destination ticket
             for dest in player.destinations:
-                if (city1 == dest.city1 and city2 == dest.city2) or (city1 == dest.city2 and city2 == dest.city1):
-                    if not player.uf.is_connected(dest.city1, dest.city2):
+                if not player.uf.is_connected(dest.city1, dest.city2):
+                    if (player.uf.is_connected(city1, dest.city1) and player.uf.is_connected(city2, dest.city2)) or \
+                    (player.uf.is_connected(city1, dest.city2) and player.uf.is_connected(city2, dest.city1)):
                         # Direct completion - highest priority, but with card penalty
                         beneficial_actions.append((action, 1000 + dest.points - card_penalty))
-                        continue
+                        break
             
-            # Check if route connects clusters that contain destination endpoints
-            connects_clusters = False
+            # If we already found a high-value action, continue to next route
+            if beneficial_actions and beneficial_actions[-1][1] >= 100:
+                continue
+            
+            # Step 2: Check if route is on the optimal path between destination endpoints
             for dest in player.destinations:
                 # Skip completed destinations
                 if player.uf.is_connected(dest.city1, dest.city2):
                     continue
-                    
-                c1_connected = player.uf.is_connected(dest.city1, city1) or player.uf.is_connected(dest.city1, city2)
-                c2_connected = player.uf.is_connected(dest.city2, city1) or player.uf.is_connected(dest.city2, city2)
                 
-                if c1_connected and c2_connected:
-                    # This route will connect two clusters containing our destination endpoints
-                    beneficial_actions.append((action, 500 + dest.points - card_penalty))
-                    connects_clusters = True
-                    break
+                # Get the optimal path between destination endpoints
+                optimal_path = self.fw.get_path(dest.city1, dest.city2)
+                if city1 in optimal_path or city2 in optimal_path:
+                    # If both cities are adjacent on the optimal path, it's even more valuable
+                    if city1 in optimal_path and city2 in optimal_path:
+                        idx1 = optimal_path.index(city1)
+                        idx2 = optimal_path.index(city2)
+                        if abs(idx1 - idx2) == 1:  # Cities are adjacent in the path
+                            beneficial_actions.append((action, 400 + dest.points - card_penalty))
+                            break
             
-            if connects_clusters:
-                continue
-                
-            # Check if route extends a cluster towards a destination endpoint
-            # This is less valuable but still good
-            relevant_dest_indices = []
-            if city1 in city_to_dest:
-                relevant_dest_indices.extend(city_to_dest[city1])
-            if city2 in city_to_dest:
-                relevant_dest_indices.extend(city_to_dest[city2])
-            
-            # Use a set for the indices to remove duplicates
-            for idx in set(relevant_dest_indices):
-                dest = player.destinations[idx]
-                # Skip completed destinations
-                if player.uf.is_connected(dest.city1, dest.city2):
-                    continue
-                    
-                # Award points based on destination value
-                score += dest.points // 2
-            
-            if score > 0:
-                # Apply card penalty to this score too
-                beneficial_actions.append((action, score - card_penalty))
-        
         # If we found beneficial actions, choose from the top ones
         if beneficial_actions:
             # Sort by score (higher is better)
@@ -950,18 +960,18 @@ class GameState:
                     for route in routes_list:
                         if route.claimed_by is None:
                             if current_player.remaining_trains > route.length:
-                                # For gray routes, check each color
-                                if route.color == Color.GRAY:
-                                    for color in Color:
-                                        if color != Color.WILD and color != Color.GRAY:
+                                # For gray routes, check each colour
+                                if route.colour == Colour.GRAY:
+                                    for colour in Colour:
+                                        if colour != Colour.WILD and colour != Colour.GRAY:
                                             route_actions.append(
-                                                        ("claim_route", city1, city2, color, 0, route, current_player.name)
+                                                        ("claim_route", city1, city2, colour, 0, route, current_player.name)
                                                     )  
                                 else:
-                                    # For colored routes
-                                    color = route.color  
+                                    # For coloured routes
+                                    colour = route.colour  
                                     route_actions.append(
-                                                        ("claim_route", city1, city2, color, 0, route, current_player.name)
+                                                        ("claim_route", city1, city2, colour, 0, route, current_player.name)
                                                     )
             # Best possible route
             best_routes = self.select_best_route_action(route_actions)
@@ -973,22 +983,22 @@ class GameState:
         if not best_routes:
             return None
         
-        # Set best and second best colors
-        best_color = best_routes[0][3]
+        # Set best and second best colours
+        best_colour = best_routes[0][3]
         if len(best_routes) > 1:
-            best_color_2 = best_routes[1][3]
-            if best_color_2 == best_color:
+            best_colour_2 = best_routes[1][3]
+            if best_colour_2 == best_colour:
                 if len(best_routes) > 2:
-                    best_color_2 = best_routes[2][3]
+                    best_colour_2 = best_routes[2][3]
                 else:
-                    best_color_2 = best_color
+                    best_colour_2 = best_colour
         else:
-            best_color_2 = best_color
+            best_colour_2 = best_colour
 
-        # Store actions which include the best color
+        # Store actions which include the best colour
         best_draw_actions = []
         for action in draw_actions:
-            if (action[2] or action[4]) == best_color:
+            if (action[2] or action[4]) == best_colour:
                 best_draw_actions.append(action)
         
         # If there are any actions that draw two of the best colour or a combo of best and second best, return that
@@ -997,7 +1007,7 @@ class GameState:
             for action in best_draw_actions:
                 if action[2] == action[4]:
                     return action
-                elif (action[2] or action[4]) == best_color_2:
+                elif (action[2] or action[4]) == best_colour_2:
                     return action
                 
             # Otherwise just return any action that draws the best colour
@@ -1006,16 +1016,16 @@ class GameState:
         # If no actions draw the best colour, try with second best colour
         best_draw_actions = []
         for action in draw_actions:
-             if (action[2] or action[4]) == best_color_2:
+             if (action[2] or action[4]) == best_colour_2:
                 best_draw_actions.append(action)
         
         if len(best_draw_actions) > 0:
             for action in best_draw_actions:
-                if (action[2] and action[4]) == best_color_2:
+                if (action[2] and action[4]) == best_colour_2:
                     return action
             return best_draw_actions[0]
         
-        # Couldn't find any actions that draw the best or second best color
+        # Couldn't find any actions that draw the best or second best colour
         return None
 
     def select_initial_destinations(self, current_player):
@@ -1165,7 +1175,7 @@ class GameState:
         if longest_player:
             longest_player.points += 10
 
-        return player.points
+        return current_player.points
     
     def print_score(self):
         longest_route = 5
@@ -1266,14 +1276,15 @@ def main():
     
     # Define agent options
     agent_options = {
-        1: "Human Player (Untested)",
+        1: "Human Player",
         2: "MCTS Tuned AI",
         3: "MCTS Untuned AI",
         4: "Destination Heuristic AI",
         5: "Longest Route Heuristic AI",
         6: "Opportunistic Heuristic AI",
         7: "Best Move Heuristic AI",
-        8: "Random AI"
+        8: "ShaoPlayer AI",
+        9: "Random AI"
     }
     
     # Create players array and agent mapping
@@ -1283,7 +1294,7 @@ def main():
 
     # Default MCTS parameters (used if not customized)
     default_num_sims = 3000
-    default_max_depth = 15
+    default_max_depth = 10
     
     
     for i in range(num_players):
@@ -1322,7 +1333,7 @@ def main():
                             # Get max depth
                             while True:
                                 try:
-                                    max_depth = int(input(f"Enter maximum search depth for MCTS (5-50, default: 15)"))
+                                    max_depth = int(input(f"Enter maximum search depth for MCTS (5-50, default: 10)"))
                                     if 5 <= max_depth <= 50:
                                         break
                                     else:
@@ -1333,7 +1344,7 @@ def main():
                             # Use default parameters
                             num_sims = default_num_sims
                             max_depth = default_max_depth
-                            print("Using default MCTS parameters (3000 sims, 15 depth).")
+                            print("Using default MCTS parameters (3000 sims, 10 depth).")
                         break
                     else:
                         print("Please enter 'y' or 'n'.")
@@ -1351,14 +1362,14 @@ def main():
         player_name = f"Player {i+1}"
         player = Player(
             name=player_name, 
-            train_cards={color: 0 for color in Color},
+            remaining_trains=45,
+            train_cards={colour: 0 for colour in Colour},
             destinations=[], 
             claimed_connections=[], 
             points=0, 
             turn=1,
             winner = False,
             wins = 0
-            
         )
         players.append(player)
         player_agents[player_name] = agent_type  # Store the agent type
@@ -1385,7 +1396,7 @@ def main():
         # Reset players
         for player in players:
             player.remaining_trains = 45
-            player.train_cards = {color: 0 for color in Color}
+            player.train_cards = {colour: 0 for colour in Colour}
             player.destinations = []
             player.claimed_connections = []
             player.claimed_cities = set()
@@ -1397,12 +1408,15 @@ def main():
         # Set up and start the game
         game = GameState()
         if gui_available and use_gui:
-            initialize_gui()
+            initialise_gui()
         game.map_type = chosen_map_type
         game.init(players)
         game.player_agents = player_agents
         game.agent_options = agent_options
 
+        if gui_available and use_gui:
+            update_game_state(game) # Populate board
+            time.sleep(0.5)
         # Main game loop
         while not game.is_end():
             game.routes_cache_valid = {player.name: False for player in game.players}
@@ -1420,7 +1434,7 @@ def main():
             
             # Execute agent-specific logic using match-case
             match agent_type:
-                case 1:  # Human Player (untested)
+                case 1:  # Human Player
                     print("You can type back to go to the previous menu option")
                     player = TicketToRideGame(game)
                     best_action = player.play_turn(current_player)
@@ -1462,24 +1476,25 @@ def main():
                 case 7:  # Best Move Heuristic AI
                     heuristic_player = BestMoveHeuristic(game)
                     best_action = heuristic_player.choose_action()
-                case 8:  # Random AI
-                    random_agent = RandomHeuristic(game)
-                    best_action = random_agent.choose_action()
+                case 8:  # ShaoPlayer AI
+                    heuristic_player = ShaoHeuristic(game)
+                    best_action = heuristic_player.choose_action()
+                case 9:  # Random AI
+                    heuristic_player = RandomHeuristic(game)
+                    best_action = heuristic_player.choose_action()
                 
             if best_action is None:
                 print(f"{current_player.name} has no valid actions. Ending turn.")
                 pass
             # Apply the action and update game state
             game.apply_action_final(best_action)
+            game.update_player_turn()
             if gui_available and use_gui:
                 update_game_state(game, best_action)
-                #pygame.event.pump()
             current_player.turn += 1
             tet = time.time()
             print(f"Time taken for turn: {tet-tst} seconds")
             
-            game.update_player_turn()
-        
         # Calculate final scores
         players_final = game.game_result_final(i+1)
         # Store results for this game
@@ -1492,21 +1507,21 @@ def main():
         seconds = int(elapsed_time % 60)
 
         print(f"Time taken: {minutes} minutes and {seconds} seconds")
-        if gui_available and use_gui:
-            shutdown()
-
         game.print_owned_routes()
-    
+
+    if gui_available and use_gui:
+        shutdown()
+
     best_player = None
     average_scores = {}
     for i in range(num_games):
         print(f"\nGame {i+1} Results:")
         for player_name, player_results in player_stats.items():
             if i < len(player_results):  # Make sure we have data for this game
+                player = player_results[i]
                 if average_scores.get(player_name) is None:
                     average_scores[player_name] = 0
                 average_scores[player_name] += player.points
-                player = player_results[i]
                 print(f"{player_name}: {player.points} points")
                 if player.winner:
                     print(f"{player_name} wins!")

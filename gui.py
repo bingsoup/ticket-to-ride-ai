@@ -4,46 +4,47 @@ import time
 import queue
 import sys
 import copy
+from helper_classes import Colour
 
 class TicketToRideGUI:
     # City coordinates for USA map
     USA_CITY_POSITIONS = {
-    "Seattle": (100, 100),
-    "Portland": (120, 150),
-    "San Francisco": (100, 300),
-    "Los Angeles": (150, 350),
-    "Salt Lake City": (250, 250),
-    "Las Vegas": (200, 320),
-    "Phoenix": (230, 370),
-    "Denver": (300, 280),
-    "Santa Fe": (300, 350),
-    "Oklahoma City": (400, 350),
-    "Dallas": (420, 400),
-    "Houston": (440, 430),
-    "El Paso": (320, 400),
-    "Winnipeg": (400, 100),
-    "Duluth": (450, 200),
-    "Omaha": (400, 250),
-    "Kansas City": (400, 300),
-    "Chicago": (500, 250),
-    "Saint Louis": (480, 320),
-    "Nashville": (520, 360),
-    "New Orleans": (500, 450),
-    "Little Rock": (450, 370),
-    "Toronto": (600, 200),
-    "Pittsburgh": (580, 260),
-    "Washington": (620, 300),
-    "Raleigh": (600, 340),
-    "Atlanta": (550, 380),
-    "Charleston": (600, 380),
-    "Miami": (620, 480),
-    "New York": (640, 260),
-    "Boston": (670, 230),
-    "Montreal": (650, 180),
-    "Sault St. Marie": (520, 180),
-    "Calgary": (200, 100),
-    "Helena": (250, 180),
-    "Vancouver": (80, 80),
+        "Seattle": (90, 100),
+        "Portland": (120, 150),
+        "San Francisco": (100, 300),
+        "Los Angeles": (130, 410),
+        "Salt Lake City": (250, 250),
+        "Las Vegas": (190, 330),
+        "Phoenix": (230, 370),
+        "Denver": (300, 280),
+        "Santa Fe": (300, 350),
+        "Oklahoma City": (400, 350),
+        "Dallas": (420, 400),
+        "Houston": (440, 440),
+        "El Paso": (310, 420),
+        "Winnipeg": (400, 100),
+        "Duluth": (450, 200),
+        "Omaha": (400, 250),
+        "Kansas City": (400, 300),
+        "Chicago": (500, 250),
+        "Saint Louis": (470, 310),
+        "Nashville": (520, 360),
+        "New Orleans": (500, 450),
+        "Little Rock": (450, 370),
+        "Toronto": (600, 200),
+        "Pittsburgh": (580, 260),
+        "Washington": (620, 300),
+        "Raleigh": (600, 340),
+        "Atlanta": (550, 380),
+        "Charleston": (600, 380),
+        "Miami": (620, 480),
+        "New York": (640, 240),
+        "Boston": (680, 210),
+        "Montreal": (650, 140),
+        "Sault St. Marie": (520, 160),
+        "Calgary": (200, 100),
+        "Helena": (250, 180),
+        "Vancouver": (100, 80),
     }
 
     # City coordinates for Europe map
@@ -98,18 +99,18 @@ class TicketToRideGUI:
     }
     
     def __init__(self):
-        # Initialize pygame
+        # initialise pygame
         pygame.init()
         
         # Constants
         self.WIDTH = 1200
         self.HEIGHT = 800
-        self.BACKGROUND_COLOR = (240, 230, 200)
-        self.TEXT_COLOR = (0, 0, 0)
-        self.HIGHLIGHT_COLOR = (255, 255, 0)
-        self.PLAYER_COLORS = [(255, 0, 0), (0, 0, 255), (0, 128, 0), (255, 165, 0)]
-        self.CITY_COLOR = (100, 100, 100)
-        self.ROUTE_COLOR = (150, 150, 150)
+        self.BACKGROUND_colour = (240, 230, 200)
+        self.TEXT_colour = (0, 0, 0)
+        self.HIGHLIGHT_colour = (255, 255, 0)
+        self.PLAYER_colours = [(255, 0, 0), (0, 0, 255), (0, 128, 0), (255, 165, 0)]
+        self.CITY_colour = (100, 100, 100)
+        self.ROUTE_colour = (150, 150, 150)
         self.FONT_SIZE = 20
         
         # State variables
@@ -124,8 +125,8 @@ class TicketToRideGUI:
         self.command_queue = queue.Queue()
         self.gui_thread = None
     
-    def initialize(self):
-        """Initialize the GUI in a separate thread"""
+    def initialise(self):
+        """initialise the GUI in a separate thread"""
         # Don't start a new thread if one is already running
         if self.gui_thread and self.gui_thread.is_alive():
             return True
@@ -140,12 +141,12 @@ class TicketToRideGUI:
             
             # Wait for the thread to be ready
             if not self.gui_thread.ready.wait(timeout=5.0):
-                print("GUI thread initialization timed out")
+                print("GUI thread initialisation timed out")
                 return False
                 
             return True
         except Exception as e:
-            print(f"Failed to initialize GUI: {e}")
+            print(f"Failed to initialise GUI: {e}")
             return False
     
     def update_game_state(self, game, action=None):
@@ -158,24 +159,42 @@ class TicketToRideGUI:
             if not self.city_positions:
                 self.set_map_type(game)
             
+            # Calculate current turn based on players' turn numbers
+            current_turn = max(player.turn for player in game.players)
+            
             # Create a thread-safe copy of the game state
             game_state = {
                 'players': [],
                 'current_player_idx': game.current_player_idx,
                 'connections': [],
-                'turn': getattr(game, 'turn', 1)  # Get turn counter, default to 1
+                'turn': current_turn,
+                'route_info': {} 
             }
             
             # Add action if provided
             if action:
                 game_state['action'] = self.format_action(action)
             
-            # Get connections from game state
+            # Get connections and route information
             if hasattr(game, 'routes') and game.routes:
                 for city1, destinations in game.routes.items():
                     for city2 in destinations:
                         if city1 < city2:  # Only add each connection once
                             game_state['connections'].append((city1, city2))
+                            
+                            # Add route information
+                            route_key = f"{city1}-{city2}"
+                            routes = game.get_routes_between_cities(city1, city2)
+                            route_infos = []
+                            
+                            for route in routes:
+                                route_infos.append({
+                                    'colour': route.colour,
+                                    'length': route.length,
+                                    'claimed_by': route.claimed_by
+                                })
+                                
+                            game_state['route_info'][route_key] = route_infos
             
             # Convert players to dict
             for i, player in enumerate(game.players):
@@ -194,7 +213,8 @@ class TicketToRideGUI:
                             5: "Longest Route Heuristic AI",
                             6: "Opportunistic Heuristic AI", 
                             7: "Best Move Heuristic AI",
-                            8: "Random AI"
+                            8: "ShaoPlayer AI",
+                            9: "Random AI"
                         }
                         agent_type = agent_types.get(agent_id, f"Agent {agent_id}")
                 
@@ -261,25 +281,28 @@ class TicketToRideGUI:
         """Format an action for display"""
         if not action:
             return "No action"
-        
         try:
             action_type = action[0]
             player_name = action[-1]  # Player name is the last element
             
             if action_type == "claim_route":
-                return f"{player_name} claimed route: {action[1]} to {action[2]} with {action[3]} cards"
+                return f"{player_name} claimed route: {action[1]} to {action[2]} with {action[3].value} cards"
             elif action_type == "draw_two_train_cards":
                 card1 = "deck" if action[2] == "deck" else action[2]
                 card2 = "deck" if action[4] == "deck" else action[4]
                 
+                if card1 == Colour.WILD:
+                    return f"{player_name} drew 1 {card1.value}"
                 if card1 == "deck" and card2 == "deck":
                     return f"{player_name} drew 2 cards from deck"
                 elif card1 == "deck":
-                    return f"{player_name} drew 1 card from deck and 1 {card2} card"
+                    return f"{player_name} drew 1 card from deck and 1 {card2.value} card"
                 elif card2 == "deck":
-                    return f"{player_name} drew 1 {card1} card and 1 card from deck"
+                    return f"{player_name} drew 1 {card1.value} card and 1 card from deck"
+                elif card1 == card2:
+                    return f"{player_name} drew 2 {card1.value} cards"
                 else:
-                    return f"{player_name} drew 1 {card1} card and 1 {card2} card"
+                    return f"{player_name} drew 1 {card1.value} card and 1 {card2.value} card"
             elif action_type == "draw_destination_tickets":
                 kept_count = action[1] + action[2] + action[3]
                 return f"{player_name} drew destination tickets and kept {kept_count}"
@@ -299,8 +322,8 @@ class TicketToRideGUI:
         
         def run(self):
             try:
-                # Initialize pygame display
-                print("Initializing GUI thread...")
+                # initialise pygame display
+                print("initialising GUI thread...")
                 self.parent.screen = pygame.display.set_mode((self.parent.WIDTH, self.parent.HEIGHT))
                 pygame.display.set_caption("Ticket to Ride AI - Game Viewer")
                 self.parent.font = pygame.font.SysFont('Arial', self.parent.FONT_SIZE)
@@ -311,7 +334,7 @@ class TicketToRideGUI:
                 print("GUI thread ready")
                 
                 # Initial screen setup
-                self.parent.screen.fill(self.parent.BACKGROUND_COLOR)
+                self.parent.screen.fill(self.parent.BACKGROUND_colour)
                 self._draw_initial_screen()
                 pygame.display.flip()
                 
@@ -358,9 +381,9 @@ class TicketToRideGUI:
         
         def _draw_initial_screen(self):
             """Draw the initial screen before any game state is available"""
-            self.parent.screen.fill(self.parent.BACKGROUND_COLOR)
+            self.parent.screen.fill(self.parent.BACKGROUND_colour)
             font = pygame.font.SysFont('Arial', 24)
-            text = font.render("Waiting for game to start...", True, self.parent.TEXT_COLOR)
+            text = font.render("Waiting for game to start...", True, self.parent.TEXT_colour)
             text_rect = text.get_rect(center=(self.parent.WIDTH//2, self.parent.HEIGHT//2))
             self.parent.screen.blit(text, text_rect)
         
@@ -371,7 +394,7 @@ class TicketToRideGUI:
                 
             try:
                 # Clear screen
-                self.parent.screen.fill(self.parent.BACKGROUND_COLOR)
+                self.parent.screen.fill(self.parent.BACKGROUND_colour)
                 
                 # Draw game elements
                 self._draw_map()
@@ -386,25 +409,179 @@ class TicketToRideGUI:
                 print(f"Error updating display: {e}")
         
         def _draw_map(self):
-            """Draw the game map with cities and routes"""
+            """Draw the game map with cities and routes, showing route lengths with dashed lines"""
             try:
                 # Draw background
                 pygame.draw.rect(self.parent.screen, (220, 200, 160), (50, 50, 700, 500))
                 
-                # Draw routes from game state connections
+                # Define colours for routes
+                colour_map = {
+                    Colour.RED: (200, 50, 50),
+                    Colour.BLUE: (50, 50, 200),
+                    Colour.GREEN: (50, 150, 50),
+                    Colour.YELLOW: (200, 200, 50),
+                    Colour.BLACK: (50, 50, 50),
+                    Colour.WHITE: (230, 230, 230),
+                    Colour.ORANGE: (230, 130, 50),
+                    Colour.PINK: (230, 130, 200),
+                    Colour.GRAY: (130, 130, 130)
+                }
+                
+                # Create a dictionary to store claimed routes with their specific indices
+                claimed_routes_with_idx = {}
+                if self.game_state and 'players' in self.game_state:
+                    for player in self.game_state['players']:
+                        if 'claimed_connections' in player:
+                            for conn in player['claimed_connections']:
+                                if len(conn) >= 2:
+                                    city1, city2 = conn[0], conn[1]
+                                    key = tuple(sorted([city1, city2]))
+                                    
+                                    # Initialize the list for this city pair if needed
+                                    if key not in claimed_routes_with_idx:
+                                        claimed_routes_with_idx[key] = []
+                                    
+                                    # Store player and route information
+                                    claimed_routes_with_idx[key].append(conn)
+                                            
+                # Get all connections from the API
                 if self.game_state and 'connections' in self.game_state:
                     for city1, city2 in self.game_state['connections']:
-                        if city1 in self.parent.city_positions and city2 in self.parent.city_positions:
-                            pos1 = self.parent.city_positions[city1]
-                            pos2 = self.parent.city_positions[city2]
-                            pygame.draw.line(self.parent.screen, self.parent.ROUTE_COLOR, pos1, pos2, 1)
+                        key = tuple(sorted([city1, city2]))
+                        
+                        # Skip if we don't have positions for both cities
+                        if city1 not in self.parent.city_positions or city2 not in self.parent.city_positions:
+                            continue
+                            
+                        pos1 = self.parent.city_positions[city1]
+                        pos2 = self.parent.city_positions[city2]
+                        
+                        # Get route information for this connection
+                        route_infos = []
+                        
+                        # Request route information through parent's API
+                        if 'route_info' in self.game_state:
+                            route_key = f"{city1}-{city2}" if city1 < city2 else f"{city2}-{city1}"
+                            if route_key in self.game_state['route_info']:
+                                route_infos = self.game_state['route_info'][route_key]
+                        
+                        # Check if we have route information
+                        if not route_infos:
+                            # Fallback to default
+                            route_colour = Colour.GRAY
+                            route_length = 1
+                            pygame_colour = colour_map.get(route_colour, (130, 130, 130))
+                            
+                            # Draw dashed line with default values
+                            self._draw_dashed_line(pos1, pos2, pygame_colour, route_length)
+                        else:
+                            # Draw each route with proper offset, including unclaimed routes
+                            claimed_count = len(claimed_routes_with_idx.get(key, []))
+                            
+                            # For routes with multiple tracks, we need to handle offsets properly
+                            for i, route_info in enumerate(route_infos):
+                                route_colour = route_info.get('colour', Colour.GRAY)
+                                route_length = route_info.get('length', 1)
+                                claimed_by = route_info.get('claimed_by', None)
+                                
+                                # Skip if claimed - will be drawn in _draw_player_routes
+                                if claimed_by is not None:
+                                    continue
+                                    
+                                pygame_colour = colour_map.get(route_colour, (130, 130, 130))
+                                
+                                # Calculate offset for parallel routes
+                                if len(route_infos) > 1:
+                                    # Calculate perpendicular vector for offset
+                                    dx = pos2[0] - pos1[0]
+                                    dy = pos2[1] - pos1[1]
+                                    length = max(1, (dx**2 + dy**2)**0.5)  # Avoid division by zero
+                                    
+                                    # Normalized perpendicular vector
+                                    nx = -dy / length
+                                    ny = dx / length
+                                    
+                                    # Apply offset based on route index and claimed status
+                                    # This ensures unclaimed routes stay in proper position
+                                    offset = 5 if i == 0 else -5
+                                    pos1_offset = (int(pos1[0] + nx * offset), int(pos1[1] + ny * offset))
+                                    pos2_offset = (int(pos2[0] + nx * offset), int(pos2[1] + ny * offset))
+                                else:
+                                    pos1_offset = pos1
+                                    pos2_offset = pos2
+                                
+                                # Draw dashed line with proper colour and length
+                                self._draw_dashed_line(pos1_offset, pos2_offset, pygame_colour, route_length)
                 
-                # Draw cities as dots
+                # Draw all cities as dots
                 for city, pos in self.parent.city_positions.items():
-                    pygame.draw.circle(self.parent.screen, self.parent.CITY_COLOR, pos, 5)
+                    pygame.draw.circle(self.parent.screen, self.parent.CITY_colour, pos, 5)
             except Exception as e:
                 print(f"Error drawing map: {e}")
         
+        def _draw_dashed_line(self, start_pos, end_pos, colour, num_segments):
+            """Draw a dashed line with consistent dash sizes regardless of distance"""
+            # Calculate the direction vector
+            dx = end_pos[0] - start_pos[0]
+            dy = end_pos[1] - start_pos[1]
+            
+            # Calculate total distance
+            distance = max(1, (dx**2 + dy**2)**0.5)
+            
+            # Normalize the direction vector
+            if distance > 0:
+                dx /= distance
+                dy /= distance
+            
+            # Use fixed sizes for dash and space
+            FIXED_DASH_LENGTH = 6  # Consistent dash length in pixels
+            FIXED_SPACE_LENGTH = 4  # Consistent space length in pixels
+            
+            # Calculate how many segments we need based on the desired number
+            # But limit by what can physically fit
+            segment_length = FIXED_DASH_LENGTH + FIXED_SPACE_LENGTH
+            max_possible_segments = int(distance / segment_length)
+            
+            # Use the minimum of the requested segments or what can physically fit
+            # But ensure at least one segment
+            actual_segments = max(1, min(num_segments, max_possible_segments))
+            
+            # Calculate spacing to distribute dashes evenly
+            total_length = actual_segments * FIXED_DASH_LENGTH + (actual_segments - 1) * FIXED_SPACE_LENGTH
+            scaling_factor = distance / total_length if total_length > 0 else 1
+            
+            # Apply scaling to maintain the ratio but fit the entire distance
+            dash_length = FIXED_DASH_LENGTH * scaling_factor
+            space_length = FIXED_SPACE_LENGTH * scaling_factor
+            
+            # Start position
+            x, y = start_pos
+            
+            # Draw all segments except the last one
+            for i in range(actual_segments - 1):
+                # Start of dash
+                dash_start = (int(x), int(y))
+                
+                # Move to end of dash
+                x += dx * dash_length
+                y += dy * dash_length
+                dash_end = (int(x), int(y))
+                
+                # Draw the dash
+                pygame.draw.line(self.parent.screen, colour, dash_start, dash_end, 2)
+                
+                # Move to start of next dash (skip the space)
+                x += dx * space_length
+                y += dy * space_length
+            
+            # Handle the last dash specially to ensure it reaches the end
+            if actual_segments > 0:
+                # Start of last dash
+                dash_start = (int(x), int(y))
+                
+                # Make sure the last dash ends exactly at end_pos
+                pygame.draw.line(self.parent.screen, colour, dash_start, end_pos, 2)
+
         def _draw_cities(self):
             """Draw city names on the map"""
             try:
@@ -412,13 +589,13 @@ class TicketToRideGUI:
                 small_font = pygame.font.SysFont('Arial', 12)
                 
                 for city, pos in self.parent.city_positions.items():
-                    text = small_font.render(city, True, self.parent.TEXT_COLOR)
+                    text = small_font.render(city, True, self.parent.TEXT_colour)
                     self.parent.screen.blit(text, (pos[0] - 15, pos[1] - 15))
             except Exception as e:
                 print(f"Error drawing cities: {e}")
         
         def _draw_player_routes(self):
-            """Draw claimed routes on the map"""
+            """Draw claimed routes on the map with player colours on top of route colours"""
             try:
                 if not self.game_state or 'players' not in self.game_state:
                     return
@@ -426,21 +603,34 @@ class TicketToRideGUI:
                 # Track which routes have been claimed to handle double routes
                 claimed_routes = {}
                 
+                # Define colours for the original route colours
+                colour_map = {
+                    Colour.RED: (200, 50, 50),
+                    Colour.BLUE: (50, 50, 200),
+                    Colour.GREEN: (50, 150, 50),
+                    Colour.YELLOW: (200, 200, 50),
+                    Colour.BLACK: (50, 50, 50),
+                    Colour.WHITE: (230, 230, 230),
+                    Colour.ORANGE: (230, 130, 50),
+                    Colour.PINK: (230, 130, 200),
+                    Colour.GRAY: (130, 130, 130)
+                }
+                
                 # First pass: collect all claimed routes by all players
                 for i, player in enumerate(self.game_state['players']):
                     if 'claimed_connections' in player:
                         for connection in player['claimed_connections']:
-                            if len(connection) >= 2:
-                                city1, city2 = connection[0], connection[1]
+                            if len(connection) >= 3:  # Must have city1, city2, and colour
+                                city1, city2, route_colour = connection[0], connection[1], connection[2]
                                 # Use a canonical order for the cities to avoid duplicates
                                 route_key = tuple(sorted([city1, city2]))
                                 
                                 if route_key not in claimed_routes:
                                     claimed_routes[route_key] = []
-                                claimed_routes[route_key].append(i)  # Store player index
+                                claimed_routes[route_key].append((i, route_colour))  # Store player index and route colour
                 
                 # Second pass: draw all routes with appropriate offsets
-                for route_key, player_indices in claimed_routes.items():
+                for route_key, claims in claimed_routes.items():
                     city1, city2 = route_key
                     
                     if city1 in self.parent.city_positions and city2 in self.parent.city_positions:
@@ -456,32 +646,62 @@ class TicketToRideGUI:
                         nx = -dy / length
                         ny = dx / length
                         
+                        # Calculate route length if possible
+                        route_length = None
+                        try:
+                            # Look up route length from route_info
+                            route_key_str = f"{city1}-{city2}" if city1 < city2 else f"{city2}-{city1}"
+                            if 'route_info' in self.game_state and route_key_str in self.game_state['route_info']:
+                                route_infos = self.game_state['route_info'][route_key_str]
+                                if route_infos and 'length' in route_infos[0]:
+                                    route_length = route_infos[0]['length']
+                        except:
+                            # Fallback if we can't get the length
+                            route_length = 1
+                        
+                        if not route_length or route_length < 1:
+                            route_length = 1
+                        
                         # Draw each player's claim with appropriate offset
-                        for idx, player_idx in enumerate(player_indices):
-                            color = self.parent.PLAYER_COLORS[player_idx % len(self.parent.PLAYER_COLORS)]
+                        for idx, (player_idx, route_colour) in enumerate(claims):
+                            # Get player colour for line
+                            player_colour = self.parent.PLAYER_colours[player_idx % len(self.parent.PLAYER_colours)]
+                            
+                            # Get route's original colour for dashes
+                            if isinstance(route_colour, str):
+                                # Try to convert string to colour enum
+                                try:
+                                    route_colour = Colour[route_colour.upper()]
+                                except:
+                                    route_colour = Colour.GRAY
+                            original_colour = colour_map.get(route_colour, (130, 130, 130))
                             
                             # Calculate offset based on number of claims
-                            if len(player_indices) == 1:
+                            if len(claims) == 1:
                                 offset = 0  # No offset for single claim
                             else:
                                 # For double routes, offset in opposite directions
-                                offset = 4 if idx == 0 else -4
+                                offset = 5 if idx == 0 else -5
                             
                             # Apply offset to create parallel lines
                             pos1_offset = (int(pos1[0] + nx * offset), int(pos1[1] + ny * offset))
                             pos2_offset = (int(pos2[0] + nx * offset), int(pos2[1] + ny * offset))
                             
-                            # Draw the route line with reduced thickness
-                            pygame.draw.line(self.parent.screen, color, pos1_offset, pos2_offset, 2)
+                            # CHANGED ORDER: First draw dashed line with route colour
+                            self._draw_dashed_line(pos1_offset, pos2_offset, original_colour, route_length)
                             
-                            # Draw small circles at each endpoint to make connections more visible
-                            pygame.draw.circle(self.parent.screen, color, pos1_offset, 3)
-                            pygame.draw.circle(self.parent.screen, color, pos2_offset, 3)
+                            # THEN draw player colour on top (thinner to let dashes show through)
+                            pygame.draw.line(self.parent.screen, player_colour, pos1_offset, pos2_offset, 2)
                             
+                            # Draw small circles at each endpoint with player colour
+                            pygame.draw.circle(self.parent.screen, player_colour, pos1_offset, 4)
+                            pygame.draw.circle(self.parent.screen, player_colour, pos2_offset, 4)
+
                             # Draw a small circle in the middle for additional visibility
                             mid_x = (pos1_offset[0] + pos2_offset[0]) // 2
                             mid_y = (pos1_offset[1] + pos2_offset[1]) // 2
-                            pygame.draw.circle(self.parent.screen, color, (mid_x, mid_y), 3)
+                            pygame.draw.circle(self.parent.screen, player_colour, (mid_x, mid_y), 3)
+                            
             except Exception as e:
                 print(f"Error drawing player routes: {e}")
         
@@ -500,7 +720,7 @@ class TicketToRideGUI:
                     
                     # Draw panel background with highlight for current player
                     if i == self.game_state.get('current_player_idx', 0):
-                        pygame.draw.rect(self.parent.screen, self.parent.HIGHLIGHT_COLOR, 
+                        pygame.draw.rect(self.parent.screen, self.parent.HIGHLIGHT_colour, 
                                        (panel_x-5, panel_y-5, panel_width+10, panel_height+10))
                     
                     # Panel background
@@ -512,9 +732,9 @@ class TicketToRideGUI:
                     agent_type = player.get('agent_type', '')
                     
                     if agent_type:
-                        name_text = self.parent.font.render(f"{player_name}: {agent_type}", True, self.parent.TEXT_COLOR)
+                        name_text = self.parent.font.render(f"{player_name}: {agent_type}", True, self.parent.TEXT_colour)
                     else:
-                        name_text = self.parent.font.render(f"{player_name}", True, self.parent.TEXT_COLOR)
+                        name_text = self.parent.font.render(f"{player_name}", True, self.parent.TEXT_colour)
                         
                     self.parent.screen.blit(name_text, (panel_x + 10, panel_y + 10))
                     
@@ -526,19 +746,19 @@ class TicketToRideGUI:
         def _draw_player_stats(self, player, panel_x, panel_y):
             """Draw player statistics in the panel"""
             # Score
-            score_text = self.parent.font.render(f"Score: {player.get('points', 0)}", True, self.parent.TEXT_COLOR)
+            score_text = self.parent.font.render(f"Score: {player.get('points', 0)}", True, self.parent.TEXT_colour)
             self.parent.screen.blit(score_text, (panel_x + 10, panel_y + 40))
             
             # Trains remaining
-            trains_text = self.parent.font.render(f"Trains: {player.get('remaining_trains', 45)}", True, self.parent.TEXT_COLOR)
+            trains_text = self.parent.font.render(f"Trains: {player.get('remaining_trains', 45)}", True, self.parent.TEXT_colour)
             self.parent.screen.blit(trains_text, (panel_x + 10, panel_y + 70))
             
             # Cards (simplified)
-            cards_text = self.parent.font.render(f"Cards: {sum(player.get('train_cards', {}).values())}", True, self.parent.TEXT_COLOR)
+            cards_text = self.parent.font.render(f"Cards: {sum(player.get('train_cards', {}).values())}", True, self.parent.TEXT_colour)
             self.parent.screen.blit(cards_text, (panel_x + 150, panel_y + 40))
             
             # Destination tickets
-            dest_text = self.parent.font.render(f"Destinations: {len(player.get('destinations', []))}", True, self.parent.TEXT_COLOR)
+            dest_text = self.parent.font.render(f"Destinations: {len(player.get('destinations', []))}", True, self.parent.TEXT_colour)
             self.parent.screen.blit(dest_text, (panel_x + 150, panel_y + 70))
         
         def _draw_action(self):
@@ -555,7 +775,7 @@ class TicketToRideGUI:
                 
                 # Draw turn counter
                 turn = self.game_state.get('turn', 1)
-                title_text = self.parent.font.render(f"Turn {turn} - Recent Actions:", True, self.parent.TEXT_COLOR)
+                title_text = self.parent.font.render(f"Turn {turn} - Recent Actions:", True, self.parent.TEXT_colour)
                 self.parent.screen.blit(title_text, (panel_x + 10, panel_y + 10))
                 
                 # Add and display action log if there's a new action
@@ -568,7 +788,7 @@ class TicketToRideGUI:
                 for i, log_entry in enumerate(reversed(self.parent.action_log)):
                     if i >= 5:  # Limit to 5 most recent actions
                         break
-                    action_text = self.parent.font.render(str(log_entry), True, self.parent.TEXT_COLOR)
+                    action_text = self.parent.font.render(str(log_entry), True, self.parent.TEXT_colour)
                     self.parent.screen.blit(action_text, (panel_x + 10, panel_y + 40 + i * 25))
             except Exception as e:
                 print(f"Error drawing action: {e}")
@@ -576,11 +796,11 @@ class TicketToRideGUI:
 # Create global singleton instance and expose public methods
 _gui_instance = None
 
-def initialize_gui():
+def initialise_gui():
     global _gui_instance
     if _gui_instance is None:
         _gui_instance = TicketToRideGUI()
-    return _gui_instance.initialize()
+    return _gui_instance.initialise()
 
 def update_game_state(game, action=None):
     global _gui_instance
