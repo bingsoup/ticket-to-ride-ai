@@ -1,20 +1,27 @@
-from helper_classes import Color, Destination, Player, Route
-# General game class for player interaction
-class TicketToRideGame:
+from helper_classes import Colour, Destination, Player, Route
+from typing import List, Dict, Tuple, Set
+
+class PlayerController:
     def __init__(self, game_state):
         self.game_state = game_state
-        self.god_mode = False
         
+    def formatted_trains(self, player: Player) -> List[str]: 
+        return [f"{colour.name.capitalize()}: {count}" for colour, count in player.train_cards.items() if count > 0]
+
+    def formatted_destinations(self, player: Player) -> List[str]: 
+        return [f"{destination.city1} to {destination.city2} ({destination.points})" for destination in player.destinations]
+    
+    def formatted_colours(self, colours: List[Colour]) -> List[str]:
+        return [colour.name.capitalize() for colour in colours]
+    
     def print_board(self):
-        #self.visualizer = TicketToRideVisualizer(self.game_state)
-        #self.visualizer.visualize_game_map()
         print("=== Ticket to Ride Board ===")
         for city1, connections in sorted(self.game_state.routes.items()):
             print(f"\n{city1}:")
             for city2, routes in sorted(connections.items()):
                 for route in routes:
                     status = "Claimed by " + route.claimed_by if route.claimed_by else "Available"
-                    print(f"  -> {city2} ({route.color} * {route.length}): {status}")
+                    print(f"  -> {city2} ({route.colour} * {route.length}): {status}")
         print("===========================")
 
     def print_available_routes(self, player: Player):
@@ -23,27 +30,19 @@ class TicketToRideGame:
         
         for city1, city2, route in unclaimed_routes:
             # Check if player has enough cards to claim the route
-            if route.color == Color.GRAY:
-                for color in Color:
-                    if player.train_cards[color] >= route.length:
-                        if available_routes.__contains__((city1, city2, route, color)): #if the route is already in the list, skip (avoids duplicates in case of multiple paths /wild cards)
-                            continue
-                        else:
-                            available_routes.append((city1, city2, route, color))
-            if player.train_cards[Color.WILD] >= route.length:
-                if available_routes.__contains__((city1, city2, route, Color.WILD)):
-                    continue
-                else:
-                    available_routes.append((city1, city2, route, Color.WILD))
-            if player.train_cards[route.color] >= route.length:
-                if available_routes.__contains__((city1, city2, route, route.color)):
-                    continue
-                else:
-                    available_routes.append((city1, city2, route, route.color))
+            if route.colour == Colour.GRAY:
+                for colour in Colour:
+                    if colour != Colour.WILD and colour != Colour.GRAY and player.train_cards[colour] + player.train_cards[Colour.WILD] >= route.length:
+                        if not any(r[0] == city1 and r[1] == city2 and r[3] == colour for r in available_routes):
+                            available_routes.append((city1, city2, route, colour))
+            elif player.train_cards[route.colour] + player.train_cards[Colour.WILD] >= route.length:
+                if not any(r[0] == city1 and r[1] == city2 and r[3] == route.colour for r in available_routes):
+                    available_routes.append((city1, city2, route, route.colour))
+        
         if available_routes:
             print("\nRoutes you can complete:")
-            for city1, city2, route, color in available_routes:
-                print(f"{city1} -> {city2} ({color} * {route.length})")
+            for city1, city2, route, colour in available_routes:
+                print(f"{city1} -> {city2} ({colour} * {route.length})")
         else:
             print("\nNo routes available to claim with your current cards.")
 
@@ -67,164 +66,194 @@ class TicketToRideGame:
         print(f"{player.name}'s destination tickets: {', '.join(self.formatted_destinations(player))}")
         print(f"Face-up cards: {', '.join([card.name for card in self.game_state.face_up_cards])}" + "\n")
 
-        choice = input("<1: Draw Train cards, 2: Claim a route, 3: Draw destination tickets, 4: Print board, 5: Print routes you can complete, 6: Print score, exit: Exit game>\n")
+        choice = input("<1: Draw Train cards, 2: Claim a route, 3: Draw destination tickets, 4: Print board, 5: Print routes you can complete, 6: Print score, 7: Show destination tickets, exit: Exit game>\n")
 
         match choice:
             case "1":
-                self.draw_train_cards(player)
+                return self.draw_train_cards(player)
             case "2":
-                self.handle_claim_route(player)
-                if self.god_mode:
-                    self.play_turn(player)
+                return self.handle_claim_route(player)
             case "3":
-                self.draw_destination_tickets(player)
+                return self.draw_destination_tickets(player)
             case "4":
                 self.print_board()
-                self.play_turn(player)
+                return self.play_turn(player)
             case "5":
                 self.print_available_routes(player)
-                self.play_turn(player)
+                return self.play_turn(player)
             case "6":
                 print(f"{player.name}'s score: {player.points}")
-                self.play_turn(player)
+                return self.play_turn(player)
             case "7": 
                 self.destination_completion_check(player)
-                self.play_turn(player)
-            case "godmode":
-                self.god_mode = True
-                self.game_state.players[0].train_cards[Color.WILD] += 100
-                self.game_state.players[1].train_cards[Color.WILD] += 100
-                self.play_turn(player)
+                return self.play_turn(player)
             case "exit":
                 exit()
             case _:
                 print("Invalid choice, please try again.")
-                self.play_turn(player)
+                return self.play_turn(player)
         
     def handle_claim_route(self, player: Player):
         print("Choose a route to claim:")
         city1 = input("Enter the first city: ")
         if city1 == "back":
-            self.play_turn(player)
-            return
+            return self.play_turn(player)
             
         city2 = input("Enter the second city: ")
         if city2 == "back":
-            self.play_turn(player)
-            return
+            return self.play_turn(player)
 
         routes = self.game_state.get_routes_between_cities(city1, city2)
         if not routes:
             print("No route exists between these cities.")
-            self.play_turn(player)
-            return
+            return self.play_turn(player)
 
-        available_colors = []
+        available_colours = []
+        route = routes[0]  # Get the first route between these cities
         
-        route = routes[0]
-        if route.claimed_by is None:
-            # TODO allow player to use a combination of wild and other colors
-            if route.color == Color.GRAY:
-                for color in Color:
-                    if player.train_cards[color] >= route.length:
-                        available_colors.append(color)
-            if player.train_cards[route.color] >= route.length:
-                available_colors.append(route.color)
+        # Check if the route is already claimed
+        if route.claimed_by is not None:
+            print(f"This route is already claimed by {route.claimed_by}.")
+            return self.play_turn(player)
+        
+        # Special handling for ferries and tunnels
+        required_locomotives = getattr(route, 'num_locomotives', 0)
+        is_tunnel = getattr(route, 'tunnel', False)
+
+        # For GRAY routes, check all colours
+        if route.colour == Colour.GRAY:
+            for colour in Colour:
+                if colour != Colour.WILD and colour != Colour.GRAY:
+                    # For ferries, make sure player has enough wilds for the required locomotives
+                    if player.train_cards[Colour.WILD] >= required_locomotives:
+                        remaining_cards_needed = route.length - required_locomotives
+                        if player.train_cards[colour] + (player.train_cards[Colour.WILD] - required_locomotives) >= remaining_cards_needed:
+                            available_colours.append(colour)
+        # For coloured routes, check that specific colour
+        else:
+            colour = route.colour
+            # For ferries, make sure player has enough wilds for the required locomotives
+            if player.train_cards[Colour.WILD] >= required_locomotives:
+                remaining_cards_needed = route.length - required_locomotives
+                if player.train_cards[colour] + (player.train_cards[Colour.WILD] - required_locomotives) >= remaining_cards_needed:
+                    available_colours.append(colour)
+
+        if not available_colours:
+            print("You don't have enough cards to claim this route.")
+            return self.play_turn(player)
+        
+        colour = None
+        if len(available_colours) > 1:
+            colour_choice = input(f"Choose a colour to claim the route ({', '.join([colour.name for colour in available_colours])}): ")
+            if colour_choice == "back":
+                return self.play_turn(player)
+                
+            for avail_colour in available_colours:
+                if colour_choice.upper() == avail_colour.name:
+                    colour = avail_colour
+                    break
+                    
+            if colour is None:
+                print("Invalid colour choice, please try again.")
+                return self.handle_claim_route(player)
+        else:
+            colour = available_colours[0]
+        
+        # Calculate base cards needed
+        base_wilds_needed = max(required_locomotives, max(0, route.length - player.train_cards[colour]))
+        
+        # Explain the costs to the player
+        if is_tunnel:
+            print(f"You are attempting to claim a tunnel route between {city1} and {city2}.")
+            print(f"Base cost: {route.length} {colour.name} cards (using {base_wilds_needed} wild cards)")
+            print("The game will draw 3 cards to check for additional costs.")
+            proceed = input("Do you want to proceed? (y/n): ")
+            if proceed.lower() != 'y':
+                return self.play_turn(player)
+        elif required_locomotives > 0:
+            print(f"This ferry route requires {required_locomotives} locomotive cards and {route.length - required_locomotives} additional cards.")
+            proceed = input("Do you want to proceed? (y/n): ")
+            if proceed.lower() != 'y':
+                return self.play_turn(player)
             
-            if player.train_cards[Color.WILD] >= route.length:
-                available_colors.append(Color.WILD)
-
-        if available_colors == []:
-            print("You don't have enough cards to claim any routes between these cities.")
-            self.play_turn(player)
-            return 
-        
-        if len(available_colors) > 1:
-            color = input(f"Choose a color to claim the route ({', '.join([colors.name for colors in available_colors])}): ")
-            if color == "back":
-                self.play_turn(player)
-                return
-            for colors in available_colors:
-                if color == colors.name:
-                    color = colors
-            if color not in available_colors:
-                print("Invalid color choice, please try again.")
-                # TODO probably make a color choice function
-                self.handle_claim_route(player)
-                return
-        else:
-            color = available_colors[0]
-        if self.game_state.claim_route(city1, city2, color, player.name):
-            # Remove cards from player's hand
-            route_length = self.game_state.get_route_length(city1, city2)
-            if color == Color.WILD:
-                player.train_cards[Color.WILD] -= route_length
-            else:
-                player.train_cards[color] -= route_length
-            player.claimed_connections.append((city1, city2, color))
-            player.claimed_cities.add(city1)
-            player.claimed_cities.add(city2)
-            player.points += self.game_state.calc_route_points(route_length)
-            print(f"{player.name} has claimed the route between {city1} and {city2} with {color}")
-            player.uf.union(city1, city2)
-        else:
-            print("Failed to claim route.")
-            self.play_turn(player)
+        # Return the claim_route action with appropriate parameters
+        if base_wilds_needed > 0:
+            print(f"You are claiming {city1} to {city2} with {colour.name}, using at least {base_wilds_needed} wild cards.")
+        else:  
+            print(f"You are claiming {city1} to {city2} with {colour.name}.")
+        return ["claim_route", city1, city2, colour, base_wilds_needed, route, player.name]
 
     def draw_train_cards(self, player: Player):
-        drawn = 0
-        while drawn < 2:
-            # TODO only allow play to pick up 1 card if they take a wild card, disallow from taking a wild as second card
-            choice = input("Would you like to draw from the face-up cards? (y/n)")
-            match choice:
-                case "y":
-                    print("Choose a card to draw:")
-                    for i, card in enumerate(self.game_state.face_up_cards):
-                        print(f"{i+1}: {card.name}")
-                    card_choice = int(input("Enter the card number: ")) - 1
-                    card = self.game_state.face_up_cards.pop(card_choice)
-                    player.train_cards[card] += 1
-                    print(f"{player.name} has drawn {card.name}")
-                    self.game_state.face_up_cards.append(self.game_state.train_deck.pop())
-                    print(f"New face-up cards: {', '.join([card.name for card in self.game_state.face_up_cards])}")
-                    drawn += 1
-                case "n":
-                    card = self.game_state.train_deck.pop()
-                    player.train_cards[card] += 1
-                    print(f"{player.name} has drawn {card.name}")
-                    drawn += 1
-                case "back":
-                    self.play_turn(player)
-                    return
-                case _:
-                    print("Invalid choice, please try again.")
-
-        print(f"{player.name}'s train cards: {', '.join(self.formatted_trains(player))}")
+        drawn_cards = []
+        card_indices = []
+        
+        for draw_num in range(2):
+            if draw_num == 1 and drawn_cards and drawn_cards[0] == Colour.WILD:
+                # If first card was wild, can't draw another card
+                print("You drew a wild card for your first pick, so you can't draw a second card.")
+                break
+                
+            choice = input(f"Card {draw_num+1}: Would you like to draw from the face-up cards? (y/n) ")
+            if choice == "back":
+                return self.play_turn(player)
+                
+            if choice.lower() == "y":
+                print("Choose a card to draw:")
+                for i, card in enumerate(self.game_state.face_up_cards):
+                    print(f"{i+1}: {card.name}")
+                    
+                card_choice = int(input("Enter the card number: ")) - 1
+                
+                if card_choice < 0 or card_choice >= len(self.game_state.face_up_cards):
+                    print("Invalid card choice. Try again.")
+                    return self.draw_train_cards(player)
+                    
+                if draw_num == 1 and self.game_state.face_up_cards[card_choice] == Colour.WILD:
+                    print("You cannot take a wild card as your second pick. Try again.")
+                    return self.draw_train_cards(player)
+                    
+                drawn_cards.append(self.game_state.face_up_cards[card_choice])
+                card_indices.append(card_choice)
+                
+            elif choice.lower() == "n":
+                drawn_cards.append("deck")
+                card_indices.append("deck")
+            else:
+                print("Invalid choice. Please enter 'y' or 'n'.")
+                return self.draw_train_cards(player)
+        
+        # Format the draw train cards action
+        if len(drawn_cards) == 1:
+            # If only one card was drawn (because first card was a wild)
+            return ["draw_two_train_cards", card_indices[0], drawn_cards[0], "nodraw", "nodraw", player.name]
+        else:
+            return ["draw_two_train_cards", card_indices[0], drawn_cards[0], card_indices[1], drawn_cards[1], player.name]
 
     def draw_destination_tickets(self, player: Player):
-        destinations = [self.game_state.destination_deck.pop() for _ in range(3)]
-        print("You have drawn the following destinations:")
+        if len(self.game_state.destination_deck) < 3:
+            print("Not enough destination tickets in the deck.")
+            return self.play_turn(player)
+            
+        # Preview the top 3 destination cards
+        destinations = self.game_state.destination_deck[:3]  # Just look at them, don't remove
+        print("You are drawing the following destination tickets:")
         for i, dest in enumerate(destinations, 1):
             print(f"{i}: {dest.city1} to {dest.city2} ({dest.points} points)")
         
-        to_keep = destinations.copy()
-        while len(to_keep) > 1:  # Must keep at least one
-            choice = input("Would you like to remove any destinations? (y/n)")
-            if choice == "y":
-                print("Which destination would you like to remove?")
-                for i, dest in enumerate(to_keep, 1):
-                    print(f"{i}: {dest.city1} to {dest.city2} ({dest.points} points)")
-                try:
-                    remove_idx = int(input("Enter the destination number to remove: ")) - 1
-                    removed = to_keep.pop(remove_idx)
-                    print(f"Removed: {removed.city1} to {removed.city2}")
-                except (ValueError, IndexError):
-                    print("Invalid choice, please try again.")
-            elif choice == "n":
-                break
-            elif choice == "back":
-                self.play_turn(player)
-                return
-
-        player.destinations.extend(to_keep)
-        print(f"{player.name}'s current destinations: {', '.join(self.formatted_destinations(player))}")
+        # Create a binary array [i, j, k] where 1 means keep and 0 means discard
+        keep_choices = [0, 0, 0]
+        
+        # Player must keep at least one card
+        while sum(keep_choices) < 1:
+            for i in range(3):
+                choice = input(f"Keep ticket {i+1}? (y/n): ")
+                if choice.lower() == "y":
+                    keep_choices[i] = 1
+                elif choice.lower() == "back":
+                    return self.play_turn(player)
+            
+            if sum(keep_choices) < 1:
+                print("You must keep at least one destination ticket.")
+        
+        # Return the draw_destination_tickets action with the keep choices
+        return ["draw_destination_tickets", keep_choices[0], keep_choices[1], keep_choices[2], player.name]

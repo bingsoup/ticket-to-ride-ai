@@ -9,7 +9,7 @@ from fw import FloydWarshall
 from map_data import MapData
 from helper_classes import UnionFind, Destination, Player, Colour, Route, UnionFind
 from heuristic_agents import DestinationHeuristic, LongestRouteHeuristic, OpportunisticHeuristic, RandomHeuristic, BestMoveHeuristic, ShaoHeuristic
-from play import TicketToRideGame
+from play import PlayerController
 import platform
 is_pypy = False
 
@@ -1244,7 +1244,6 @@ class GameState:
 def main():
     timestart = time.time()
     
-
     # Ask user for number of players and agent types
     print("\nWelcome to Ticket to Ride!")
     
@@ -1436,7 +1435,7 @@ def main():
             match agent_type:
                 case 1:  # Human Player
                     print("You can type back to go to the previous menu option")
-                    player = TicketToRideGame(game)
+                    player = PlayerController(game)
                     best_action = player.play_turn(current_player)
                 case 2:  # MCTS AI
                     # Get player-specific MCTS parameters or use defaults

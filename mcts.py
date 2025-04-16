@@ -1,6 +1,7 @@
 import math
 import random
 from heuristic_agents import DestinationHeuristic, RandomHeuristic
+from console import LiveConsole, is_pypy
 #from graph import visualize_mcts_tree as viz_mcts
 
 class MCTSNode:
@@ -90,39 +91,35 @@ class MCTSNode:
                 # Add bias for claim_route actions that might reduce destination distances
                 if child.action and child.action[0] == 'claim_route' and num_incomplete > 0:
                     city1, city2 = child.action[1], child.action[2]
-                    
                     # Quick check if route directly connects destination endpoints
                     dest_bonus = 0
                     for dest in self.state.current_player.destinations:
-                        if (city1 == dest.city1 and city2 == dest.city2) or \
-                        (city1 == dest.city2 and city2 == dest.city1):
-                            if not self.state.current_player.uf.is_connected(dest.city1, dest.city2):
-                                # Direct connection gets high bonus
-                                dest_bonus += 1.0
-                    
-                    # Add bonus for routes that connect to destination cities
-                    for dest in self.state.current_player.destinations:
-                        if city1 in (dest.city1, dest.city2) or city2 in (dest.city1, dest.city2):
-                            dest_bonus += 0.2
-                    
-                    # Scale bonus based on number of incomplete tickets
-                    uct_score += dest_bonus * (num_incomplete / 3)
+                        if not self.state.current_player.uf.is_connected(dest.city1, dest.city2):
+                            best_path = self.state.fw.get_path(dest.city1, dest.city2)
+                            if self.state.current_player.uf.is_connected(city1, dest.city1) and self.state.current_player.uf.is_connected(city1, dest.city2) \
+                            or self.state.current_player.uf.is_connected(city2, dest.city1) and self.state.current_player.uf.is_connected(city2, dest.city2):
+                                # Move connects destination endpoints
+                                dest_bonus += 25
+                            elif best_path and (city1 in best_path and city2 in best_path):
+                                # Move is in path
+                                dest_bonus += 10 
+                    # Scale bonus perhaps
+                    uct_score += dest_bonus
                 
                 # Penalize drawing more destination tickets when we already have many
-                if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete >= 1:
-                    # Progressive penalty: more incomplete tickets = bigger penalty
-                    uct_score -= 5 * num_incomplete
-                if child.action and child.action[0] == 'draw_destination_tickets' and num_incomplete == 0 \
-                and self.state.current_player.remaining_trains > 15:
-                    # Reward for drawing destination tickets if its easily achievable
-                    uct_score += 3
-                """
+                if child.action and child.action[0] == 'draw_destination_tickets':
+                    if num_incomplete >= 1:
+                        # Progressive penalty: more incomplete tickets = bigger penalty
+                        uct_score -= 10 * num_incomplete
+                    elif self.state.current_player.remaining_trains > 15:
+                        uct_score += 10
+                
                 if child.action and child.action[0] == 'draw_two_train_cards':
                     # Punish drawing train cards if we have many already
                     num_cards = len(self.state.current_player.train_cards)
-                    if num_cards > 10:
-                        uct_score -= 10 * (num_cards / 10)
-                """
+                    if num_cards > 15:
+                        uct_score -= (num_cards * 0.5)
+                
                 choices_weights.append(uct_score)
         
         return self.children[choices_weights.index(max(choices_weights))]
@@ -182,8 +179,8 @@ class MCTSNode:
                 current_rollout_state.switch_turn()
                 if current_rollout_state.current_player.name != current_player.name:   
                     # Opponents play immediately after
-                    #opponent_action = DestinationHeuristic(current_rollout_state).choose_action()
-                    opponent_action = RandomHeuristic(current_rollout_state).choose_action()
+                    opponent_action = DestinationHeuristic(current_rollout_state).choose_action()
+                    #opponent_action = RandomHeuristic(current_rollout_state).choose_action()
                     if opponent_action:
                         current_rollout_state.apply_action(opponent_action)
                     else:
@@ -198,7 +195,9 @@ class MCTSNode:
         return current_rollout_state, destination_modifier, distance_modifier
 
     def rollout_policy(self, possible_moves, current_rollout_state):
-        # Bias choices
+        # Just use the agent
+        return DestinationHeuristic(current_rollout_state).choose_action()
+        """ # Old rollout policy
         action_found = False
         while not action_found:
             random_choice = random.random()
@@ -206,7 +205,7 @@ class MCTSNode:
             destinations = current_rollout_state.check_all_destinations(current_rollout_state.current_player)
             sum_dest = sum(1 for dest in destinations if dest[1] == False)
             if sum_dest >= 2:
-                dest_mod = 0
+                dest_mod = 0.01
             elif sum_dest == 1:
                 dest_mod = 0.05
             elif sum_dest == 0:
@@ -214,7 +213,7 @@ class MCTSNode:
 
             if random_choice < dest_mod:
                 random_type = 'draw_destination_tickets'
-            elif random_choice < 0.50:
+            elif random_choice < 0.5:
                 random_type = 'claim_route'
             else:
                 random_type = 'draw_two_train_cards'
@@ -241,6 +240,7 @@ class MCTSNode:
                     return best_cards
         
         return random.choice(action_type)
+        """
     
     def backpropagate(self, result,dest_mod,dist_mod):
         self.visits += 1
@@ -255,25 +255,54 @@ class MCTSNode:
             self.parent.backpropagate(result,dest_mod*0.9,dist_mod*0.9)
 
 class MCTS:
-    def __init__(self, game_state, update_queue=None):
+    def __init__(self, game_state):
         self.root = MCTSNode(game_state)
-        self.update_queue = update_queue
+        self.console = None if is_pypy else LiveConsole()
 
     def best_action(self, simulations_number, max_depth):
-        for sim_num in range(simulations_number):
-            v = self.tree_policy()
-            state, dest_mod, dist_mod = v.rollout(max_depth)
-            player = state.players[state.current_player_idx]
-            reward = state.game_result(sim_num)
-            v.backpropagate(reward,dest_mod,dist_mod)
-         # Visualize the tree
-        """
-        viz_mcts(self.root, max_depth=4, 
-                       filename=f"mcts_tree_turn_{self.root.state.current_player.turn}.png")
-        """
-        #self.root.state.apply_action(self.root.best_child().action)
-        self.root.state.print_score()
-        return self.root.best_child().action
+        if self.console and not is_pypy:
+            self.console.start_live(simulations_number)
+
+        try:
+            for sim_num in range(simulations_number):
+                v = self.tree_policy()
+                state, dest_mod, dist_mod = v.rollout(max_depth)
+                player = state.players[state.current_player_idx]
+                reward = state.game_result(sim_num)
+                v.backpropagate(reward, dest_mod, dist_mod)
+                
+                # Update the console display every 10 simulations to avoid slowdown
+                if self.console and sim_num % 10 == 0 and not is_pypy:
+                    # Collect player information
+                    player_info = {
+                        'name': player.name,
+                        'points': reward  # Use the calculated reward as points
+                    }
+                    self.console.update_display(sim_num, player_info)
+                    
+            # Show when its complete
+            if self.console and not is_pypy:
+                player = self.root.state.current_player
+                self.console.update_display(simulations_number, {'name': player.name, 'points': player.points})
+                self.console.stop()
+                
+             # Visualize the tree
+            """
+            viz_mcts(self.root, max_depth=4, 
+                        filename=f"mcts_tree_turn_{self.root.state.current_player.turn}.png")
+            """
+            # Print score and return best action
+            return self.root.best_child().action
+            
+        except Exception as e:
+            print(f"Error in MCTS simulation: {e}")
+            # Stop if theres an error
+            if self.console and not is_pypy:
+                self.console.stop()
+            # Return a valid action if possible
+            if self.root.children:
+                return self.root.best_child().action
+            return None
  
     def tree_policy(self):
         current_node = self.root
