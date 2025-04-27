@@ -246,10 +246,8 @@ class TicketToRideGUI:
             print("Sending shutdown command to GUI thread...")
             self.command_queue.put("quit")
 
-            # Wait for thread to finish (with timeout)
             self.gui_thread.join(timeout=2.0)
 
-            # If thread is still alive, it might be stuck
             if self.gui_thread.is_alive():
                 print("GUI thread did not terminate gracefully")
             else:
@@ -341,7 +339,6 @@ class TicketToRideGUI:
                 pygame.display.set_caption("Ticket to Ride AI - Game Viewer")
                 self.parent.font = pygame.font.SysFont("Arial", self.parent.FONT_SIZE)
 
-                # Signal that we're ready
                 self.parent.running = True
                 self.ready.set()
                 print("GUI thread ready")
@@ -377,7 +374,6 @@ class TicketToRideGUI:
                     except queue.Empty:
                         pass
 
-                    # Limit frame rate to save CPU
                     clock.tick(30)
 
                 print("GUI thread exiting normally")
@@ -456,14 +452,13 @@ class TicketToRideGUI:
                                     city1, city2 = conn[0], conn[1]
                                     key = tuple(sorted([city1, city2]))
 
-                                    # Initialize the list for this city pair if needed
+                                    # Initialise the list for this city pair if needed
                                     if key not in claimed_routes_with_idx:
                                         claimed_routes_with_idx[key] = []
 
                                     # Store player and route information
                                     claimed_routes_with_idx[key].append(conn)
 
-                # Get all connections from the API
                 if self.game_state and "connections" in self.game_state:
                     for city1, city2 in self.game_state["connections"]:
                         key = tuple(sorted([city1, city2]))
@@ -481,7 +476,6 @@ class TicketToRideGUI:
                         # Get route information for this connection
                         route_infos = []
 
-                        # Request route information through parent's API
                         if "route_info" in self.game_state:
                             route_key = (
                                 f"{city1}-{city2}"
@@ -505,9 +499,6 @@ class TicketToRideGUI:
                                 pos1, pos2, pygame_colour, route_length
                             )
                         else:
-                            # Draw each route with proper offset, including unclaimed routes
-                            claimed_count = len(claimed_routes_with_idx.get(key, []))
-
                             # For routes with multiple tracks, we need to handle offsets properly
                             for i, route_info in enumerate(route_infos):
                                 route_colour = route_info.get("colour", Colour.GRAY)
@@ -531,7 +522,6 @@ class TicketToRideGUI:
                                         1, (dx**2 + dy**2) ** 0.5
                                     )  # Avoid division by zero
 
-                                    # Normalized perpendicular vector
                                     nx = -dy / length
                                     ny = dx / length
 
@@ -575,32 +565,28 @@ class TicketToRideGUI:
             # Calculate total distance
             distance = max(1, (dx**2 + dy**2) ** 0.5)
 
-            # Normalize the direction vector
+            # normalise
             if distance > 0:
                 dx /= distance
                 dy /= distance
 
-            # Use fixed sizes for dash and space
-            FIXED_DASH_LENGTH = 6  # Consistent dash length in pixels
-            FIXED_SPACE_LENGTH = 4  # Consistent space length in pixels
+            FIXED_DASH_LENGTH = 6
+            FIXED_SPACE_LENGTH = 4
 
-            # Calculate how many segments we need based on the desired number
-            # But limit by what can physically fit
             segment_length = FIXED_DASH_LENGTH + FIXED_SPACE_LENGTH
             max_possible_segments = int(distance / segment_length)
 
-            # Use the minimum of the requested segments or what can physically fit
-            # But ensure at least one segment
+            # Use the minimum of the requested segments or what can fit
             actual_segments = max(1, min(num_segments, max_possible_segments))
 
-            # Calculate spacing to distribute dashes evenly
+            # Calculate spacing
             total_length = (
                 actual_segments * FIXED_DASH_LENGTH
                 + (actual_segments - 1) * FIXED_SPACE_LENGTH
             )
             scaling_factor = distance / total_length if total_length > 0 else 1
 
-            # Apply scaling to maintain the ratio but fit the entire distance
+            # Apply scaling
             dash_length = FIXED_DASH_LENGTH * scaling_factor
             space_length = FIXED_SPACE_LENGTH * scaling_factor
 
@@ -609,10 +595,8 @@ class TicketToRideGUI:
 
             # Draw all segments except the last one
             for i in range(actual_segments - 1):
-                # Start of dash
                 dash_start = (int(x), int(y))
 
-                # Move to end of dash
                 x += dx * dash_length
                 y += dy * dash_length
                 dash_end = (int(x), int(y))
@@ -624,7 +608,6 @@ class TicketToRideGUI:
                 x += dx * space_length
                 y += dy * space_length
 
-            # Handle the last dash specially to ensure it reaches the end
             if actual_segments > 0:
                 # Start of last dash
                 dash_start = (int(x), int(y))
@@ -653,7 +636,7 @@ class TicketToRideGUI:
                 # Track which routes have been claimed to handle double routes
                 claimed_routes = {}
 
-                # Define colours for the original route colours
+                # Define colours
                 colour_map = {
                     Colour.RED: (200, 50, 50),
                     Colour.BLUE: (50, 50, 200),
@@ -666,28 +649,23 @@ class TicketToRideGUI:
                     Colour.GRAY: (130, 130, 130),
                 }
 
-                # First pass: collect all claimed routes by all players
+                # collect all claimed routes by all players
                 for i, player in enumerate(self.game_state["players"]):
                     if "claimed_connections" in player:
                         for connection in player["claimed_connections"]:
-                            if (
-                                len(connection) >= 3
-                            ):  # Must have city1, city2, and colour
+                            if len(connection) >= 3:
                                 city1, city2, route_colour = (
                                     connection[0],
                                     connection[1],
                                     connection[2],
                                 )
-                                # Use a canonical order for the cities to avoid duplicates
                                 route_key = tuple(sorted([city1, city2]))
 
                                 if route_key not in claimed_routes:
                                     claimed_routes[route_key] = []
-                                claimed_routes[route_key].append(
-                                    (i, route_colour)
-                                )  # Store player index and route colour
+                                claimed_routes[route_key].append((i, route_colour))
 
-                # Second pass: draw all routes with appropriate offsets
+                # draw all routes with appropriate offsets
                 for route_key, claims in claimed_routes.items():
                     city1, city2 = route_key
 
@@ -698,18 +676,14 @@ class TicketToRideGUI:
                         pos1 = self.parent.city_positions[city1]
                         pos2 = self.parent.city_positions[city2]
 
-                        # Calculate direction vector and perpendicular vector for offsets
+                        # Calculate vectors
                         dx = pos2[0] - pos1[0]
                         dy = pos2[1] - pos1[1]
-                        length = max(
-                            1, (dx**2 + dy**2) ** 0.5
-                        )  # Avoid division by zero
+                        length = max(1, (dx**2 + dy**2) ** 0.5)
 
-                        # Normalized perpendicular vector
                         nx = -dy / length
                         ny = dx / length
 
-                        # Calculate route length if possible
                         route_length = None
                         try:
                             # Look up route length from route_info
@@ -728,22 +702,18 @@ class TicketToRideGUI:
                                 if route_infos and "length" in route_infos[0]:
                                     route_length = route_infos[0]["length"]
                         except:
-                            # Fallback if we can't get the length
                             route_length = 1
 
                         if not route_length or route_length < 1:
                             route_length = 1
 
-                        # Draw each player's claim with appropriate offset
+                        # Draw each player's claim
                         for idx, (player_idx, route_colour) in enumerate(claims):
-                            # Get player colour for line
                             player_colour = self.parent.PLAYER_colours[
                                 player_idx % len(self.parent.PLAYER_colours)
                             ]
 
-                            # Get route's original colour for dashes
                             if isinstance(route_colour, str):
-                                # Try to convert string to colour enum
                                 try:
                                     route_colour = Colour[route_colour.upper()]
                                 except:
@@ -756,10 +726,8 @@ class TicketToRideGUI:
                             if len(claims) == 1:
                                 offset = 0  # No offset for single claim
                             else:
-                                # For double routes, offset in opposite directions
                                 offset = 5 if idx == 0 else -5
 
-                            # Apply offset to create parallel lines
                             pos1_offset = (
                                 int(pos1[0] + nx * offset),
                                 int(pos1[1] + ny * offset),
@@ -769,12 +737,12 @@ class TicketToRideGUI:
                                 int(pos2[1] + ny * offset),
                             )
 
-                            # CHANGED ORDER: First draw dashed line with route colour
+                            # draw dashed line with route colour
                             self._draw_dashed_line(
                                 pos1_offset, pos2_offset, original_colour, route_length
                             )
 
-                            # THEN draw player colour on top (thinner to let dashes show through)
+                            # draw player colour on top
                             pygame.draw.line(
                                 self.parent.screen,
                                 player_colour,
@@ -783,7 +751,7 @@ class TicketToRideGUI:
                                 2,
                             )
 
-                            # Draw small circles at each endpoint with player colour
+                            # circles at endpoints
                             pygame.draw.circle(
                                 self.parent.screen, player_colour, pos1_offset, 4
                             )
@@ -791,7 +759,7 @@ class TicketToRideGUI:
                                 self.parent.screen, player_colour, pos2_offset, 4
                             )
 
-                            # Draw a small circle in the middle for additional visibility
+                            # circle in middle
                             mid_x = (pos1_offset[0] + pos2_offset[0]) // 2
                             mid_y = (pos1_offset[1] + pos2_offset[1]) // 2
                             pygame.draw.circle(
@@ -814,7 +782,6 @@ class TicketToRideGUI:
                 for i, player in enumerate(self.game_state["players"]):
                     panel_y = 50 + i * (panel_height + 10)
 
-                    # Draw panel background with highlight for current player
                     if i == self.game_state.get("current_player_idx", 0):
                         pygame.draw.rect(
                             self.parent.screen,
@@ -826,15 +793,13 @@ class TicketToRideGUI:
                                 panel_height + 10,
                             ),
                         )
-
-                    # Panel background
+                    # draw panel bg
                     pygame.draw.rect(
                         self.parent.screen,
                         (255, 255, 255),
                         (panel_x, panel_y, panel_width, panel_height),
                     )
 
-                    # Player name and agent type
                     player_name = f"Player {i + 1}"
                     agent_type = player.get("agent_type", "")
 
@@ -872,7 +837,7 @@ class TicketToRideGUI:
             )
             self.parent.screen.blit(trains_text, (panel_x + 10, panel_y + 70))
 
-            # Cards (simplified)
+            # Cards
             cards_text = self.parent.font.render(
                 f"Cards: {sum(player.get('train_cards', {}).values())}",
                 True,
@@ -910,15 +875,15 @@ class TicketToRideGUI:
                 )
                 self.parent.screen.blit(title_text, (panel_x + 10, panel_y + 10))
 
-                # Add and display action log if there's a new action
+                # display action log
                 if "action" in self.game_state:
                     self.parent.action_log.append(self.game_state["action"])
                     if len(self.parent.action_log) > 10:
                         self.parent.action_log.pop(0)
 
-                # Draw action log entries
+                # draw recent actions
                 for i, log_entry in enumerate(reversed(self.parent.action_log)):
-                    if i >= 5:  # Limit to 5 most recent actions
+                    if i >= 5:  # 5 most recent actions
                         break
                     action_text = self.parent.font.render(
                         str(log_entry), True, self.parent.TEXT_colour
@@ -930,7 +895,6 @@ class TicketToRideGUI:
                 print(f"Error drawing action: {e}")
 
 
-# Create global singleton instance and expose public methods
 _gui_instance = None
 
 
