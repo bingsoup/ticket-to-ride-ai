@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project implements and evaluates various artificial intelligence agents for playing the board game Ticket to Ride. It serves as a framework for comparing different AI approaches in a complex, partially observable game environment with both competitive and strategic elements.
+This project implements and evaluates various artificial intelligence agents for playing the board game Ticket to Ride. It serves as a framework for comparing different AI approaches. It can also be used by players who want to play against powerful AI agents for entertainment or practice.
 
 ## About Ticket to Ride
 
@@ -12,35 +12,34 @@ Ticket to Ride is a popular board game where players collect colored train cards
 
 - Complete implementation of the Ticket to Ride game logic
 - Multiple AI agent implementations with different strategies
-- Customizable game setup with variable player count
+- Customisable game setup with variable player count
 - Performance evaluation and comparison between agents
 
 ## AI Agents Implemented
 
 1. **MCTS (Monte Carlo Tree Search)** - Uses simulation-based search to find optimal moves
-2. **Destination Heuristic** - Prioritizes routes that help complete destination tickets
+2. **Destination Heuristic** - Prioritises routes that help complete destination tickets
 3. **Longest Route Heuristic** - Focuses on building the longest continuous route
 4. **Opportunistic Heuristic** - Makes moves that yield immediate point gains
 5. **Best Move Heuristic** - Selects optimal moves based on current game state
-6. **Random AI** - Makes random legal moves (baseline for comparison)
-7. **Neural Network Agent** - Uses a trained neural network to evaluate game states and select actions
+6. **Random AI** - Makes random legal moves (baseline)
 
 ## Installation
 
 ### Prerequisites
 
 - Python 3.10 or newer
-- rich.live
-- PyGame (Required for GUI)
-- pypy (Recommended for faster execution but not required, no packages required for pypy)
+- rich.live (Required)
+- PyGame (Recommended for GUI)
+- pypy (Can be used for faster simulation time, doesn't use GUI or rich console)
 
 ### Setup
 
 1. Clone the repository:
-```git clone [repository-url] cd ticket-to-ride-ai```
+```git clone https://github.com/finnjames1002/ticket-to-ride-ai cd ticket-to-ride-ai```
 
 2. Install dependencies:
-```Not finalised```
+```pip install rich```
 
 ## Running the Game
 
@@ -49,8 +48,8 @@ Run ```python game.py``` or ```pypy game.py``` in cmd or any terminal applicatio
 Follow the interactive prompts to:
 
 1. Select the number of players (2-4)
-2. Choose AI agent types for each player
-3. Watch the game play out
+2. Choose AI agent types or play yourself for each player
+3. Watch the game play out or play against AI
 
 ## Project Structure
 

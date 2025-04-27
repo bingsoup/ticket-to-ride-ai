@@ -213,12 +213,13 @@ class TicketToRideGUI:
                         agent_types = {
                             1: "Human Player",
                             2: "MCTS Tuned AI",
-                            3: "MCTS Untuned AI",
-                            4: "Destination Heuristic AI",
-                            5: "Longest Route Heuristic AI",
-                            6: "Best Move Heuristic AI",
-                            7: "ShaoPlayer AI",
-                            8: "Random AI",
+                            3: "MCTS Rollouts AI",
+                            4: "MCTS Selection AI",
+                            5: "MCTS Untuned AI",
+                            6: "Destination Heuristic AI",
+                            7: "Longest Route Heuristic AI",
+                            8: "Best Move Heuristic AI",
+                            9: "Random AI",
                         }
                         agent_type = agent_types.get(agent_id, f"Agent {agent_id}")
 

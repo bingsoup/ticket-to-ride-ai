@@ -12,7 +12,6 @@ from heuristic_agents import (
     DestinationHeuristic,
     LongestRouteHeuristic,
     RandomHeuristic,
-    ShaoHeuristic,
 )
 from map_data import MapData
 from mcts import MCTS
@@ -1511,8 +1510,7 @@ def main():
         6: "Destination Heuristic AI",
         7: "Longest Route Heuristic AI",
         8: "Best Move Heuristic AI",
-        9: "ShaoPlayer AI",
-        10: "Random AI",
+        9: "Random AI",
     }
 
     # Create players array and agent mapping
@@ -1751,10 +1749,7 @@ def main():
                 case 8:  # Best Move Heuristic AI
                     heuristic_player = BestMoveHeuristic(game)
                     best_action = heuristic_player.choose_action()
-                case 9:  # ShaoPlayer AI
-                    heuristic_player = ShaoHeuristic(game)
-                    best_action = heuristic_player.choose_action()
-                case 10:  # Random AI
+                case 9:  # Random AI
                     heuristic_player = RandomHeuristic(game)
                     best_action = heuristic_player.choose_action()
 
@@ -1789,7 +1784,6 @@ def main():
 
         print(f"Time taken: {minutes} minutes and {seconds} seconds")
 
-    # Enhanced statistics tracking
     if gui_available and use_gui:
         shutdown()
 
