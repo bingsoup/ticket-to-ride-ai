@@ -14,6 +14,7 @@ Ticket to Ride is a popular board game where players collect colored train cards
 - Multiple AI agent implementations with different strategies
 - Customisable game setup with variable player count
 - Performance evaluation and comparison between agents
+- GUI For visualisation
 
 ## AI Agents Implemented
 
@@ -83,6 +84,6 @@ The Monte Carlo Tree Search agent:
 
 Various specialized strategies:
 
-- **Destination-focused**: Prioritizes routes needed for destination tickets
+- **Destination-focused**: Prioritises routes needed for destination tickets
 - **Longest Route**: Builds continuous connections for the longest route bonus
 - **Best Move**: Evaluates and selects locally optimal actions
