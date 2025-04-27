@@ -30,8 +30,9 @@ Ticket to Ride is a popular board game where players collect colored train cards
 ### Prerequisites
 
 - Python 3.10 or newer
-- NumPy
-- pypy (Recommended for faster execution but not required)
+- rich.live
+- PyGame (Required for GUI)
+- pypy (Recommended for faster execution but not required, no packages required for pypy)
 
 ### Setup
 
@@ -49,7 +50,7 @@ Follow the interactive prompts to:
 
 1. Select the number of players (2-4)
 2. Choose AI agent types for each player
-3. Watch the game play out automatically
+3. Watch the game play out
 
 ## Project Structure
 
@@ -85,33 +86,4 @@ Various specialized strategies:
 
 - **Destination-focused**: Prioritizes routes needed for destination tickets
 - **Longest Route**: Builds continuous connections for the longest route bonus
-- **Opportunistic**: Takes immediate high-value moves
 - **Best Move**: Evaluates and selects locally optimal actions
-
-## Evaluation & Results
-
-(TODO)
-The framework allows for comparison between different agent strategies by:
-
-- Win rates in head-to-head play
-- Average score achieved
-- Ability to complete destination tickets
-- Efficiency in claiming key routes
-
-## Future Work
-
-- Implementing a GUI
-- Neural Network agent
-- Neural Network selection for MCTS
-
-## Acknowledgments
-
-This project was developed as part of a dissertation in artificial intelligence and game theory. It builds on research in the fields of:
-
-- AI for board games
-- Decision making under uncertainty
-- Monte-Carlo tree search optimisation techniques
-
-## License
-
-[Specify license or note that it's for academic purposes]
