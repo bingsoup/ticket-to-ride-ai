@@ -1,8 +1,10 @@
-# Ticket to Ride AI - Dissertation Project
+# Ticket to Ride Engine with complex AI
 
 ## Overview
 
-This project implements and evaluates various artificial intelligence agents for playing the board game Ticket to Ride. It serves as a framework for comparing different AI approaches. It can also be used by players who want to play against powerful AI agents for entertainment or practice.
+This project implements various artificial intelligence agents for playing the board game Ticket to Ride. It serves as a framework for comparing and evaluating different AI approaches. It can also be used by players who want to play against the strongest TTR AI available for entertainment or practice.
+
+The code for this program is designed to be extendable and interpretable, if you would like to add a new map or agent to the game, it should be easy. If you need any help, feel free to message me.
 
 ## About Ticket to Ride
 
@@ -11,6 +13,7 @@ Ticket to Ride is a popular board game where players collect colored train cards
 ## Features
 
 - Complete implementation of the Ticket to Ride game logic
+- USA and European maps
 - Multiple AI agent implementations with different strategies
 - Customisable game setup with variable player count
 - Performance evaluation and comparison between agents
@@ -18,12 +21,8 @@ Ticket to Ride is a popular board game where players collect colored train cards
 
 ## AI Agents Implemented
 
-1. **MCTS (Monte Carlo Tree Search)** - Uses simulation-based search to find optimal moves
-2. **Destination Heuristic** - Prioritises routes that help complete destination tickets
-3. **Longest Route Heuristic** - Focuses on building the longest continuous route
-4. **Opportunistic Heuristic** - Makes moves that yield immediate point gains
-5. **Best Move Heuristic** - Selects optimal moves based on current game state
-6. **Random AI** - Makes random legal moves (baseline)
+1. **MCTS (Monte Carlo Tree Search)** - Future planning AI which uses simulation-based search to find optimal moves
+2. **Sequential Heuristic Agents** -  Simple agents which use a set of pre-determined heuristics to evaluate move suitability.
 
 ## Installation
 
@@ -32,15 +31,24 @@ Ticket to Ride is a popular board game where players collect colored train cards
 - Python 3.10 or newer
 - rich.live (Required)
 - PyGame (Recommended for GUI)
-- pypy (Can be used for faster simulation time, doesn't use GUI or rich console)
+- PyPy (Can be used for faster simulation time, doesn't use GUI or rich console)
 
 ### Setup
 
-1. Clone the repository:
-```git clone https://github.com/finnjames1002/ticket-to-ride-ai cd ticket-to-ride-ai```
+1.1. Clone the repository:
+```git clone https://github.com/bingsoup/ticket-to-ride-ai cd ticket-to-ride-ai```
+
+or 
+
+1.2. Download the latest release and unzip it to your chosen folder.
 
 2. Install dependencies:
-```pip install rich```
+Navigate your terminal to the folder within which the code has been stored, then.
+- Install Rich ```pip install rich```
+
+3. (Optional):
+- Install PyGame for GUI elements ```pip install pygame``` **(Recommended)**
+- Use PyPy for 2-3x increase in MCTS performance [PyPy Download Page](pypy.org/download.html)
 
 ## Running the Game
 
