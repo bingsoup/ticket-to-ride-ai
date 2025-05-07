@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project implements various artificial intelligence agents for playing the board game Ticket to Ride. It serves as a framework for comparing and evaluating different AI approaches. It can also be used by players who want to play against the strongest TTR AI available for entertainment or practice.
+This project implements the engine and various artificial intelligence agents for the board game Ticket to Ride. The engine support player versus AI, player versus player, and AI versus AI play. It is intended to serve as a framework for comparing and evaluating different AI approaches. It can also be used by players who want to play against the strongest TTR AI available for entertainment or practice.
 
 The code for this program is designed to be extendable and interpretable, if you would like to add a new map or agent to the game, it should be easy. If you need any help, feel free to message me.
 
@@ -30,25 +30,19 @@ Ticket to Ride is a popular board game where players collect colored train cards
 
 - Python 3.10 or newer
 - rich.live (Required)
-- PyGame (Recommended for GUI)
+- PyGame (Recommended for Player vs. AI)
 - PyPy (Can be used for faster simulation time, doesn't use GUI or rich console)
 
 ### Setup
 
-1.1. Clone the repository:
-```git clone https://github.com/bingsoup/ticket-to-ride-ai cd ticket-to-ride-ai```
+1. Clone the repository:
+```git clone https://github.com/bingsoup/ticket-to-ride-ai cd ticket-to-ride-ai``` **or** Download the latest release and unzip it to your chosen folder.
 
-or 
-
-1.2. Download the latest release and unzip it to your chosen folder.
-
-2. Install dependencies:
+3. Install dependencies:
 Navigate your terminal to the folder within which the code has been stored, then.
-- Install Rich ```pip install rich```
-
-3. (Optional):
+- Install Rich ```pip install rich``` **(Required)**
 - Install PyGame for GUI elements ```pip install pygame``` **(Recommended)**
-- Use PyPy for 2-3x increase in MCTS performance [PyPy Download Page](pypy.org/download.html)
+- Use PyPy for 2-3x increase in MCTS performance ([PyPy Download Page](pypy.org/download.html)) (**Optional**)
 
 ## Running the Game
 
@@ -90,7 +84,7 @@ The Monte Carlo Tree Search agent:
 
 ### Heuristic Agents
 
-Various specialized strategies:
+Various specialised strategies:
 
 - **Destination-focused**: Prioritises routes needed for destination tickets
 - **Longest Route**: Builds continuous connections for the longest route bonus
